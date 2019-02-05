@@ -166,6 +166,8 @@ def _convert_core_vs_adjunct(labels, argtypes):
     def _convert(_label, _argtype):
         if _label == 'O':
             return _label
+        if _label.endswith('-V'):
+            return _label
         return _label + '-' + _argtype
 
     result = []

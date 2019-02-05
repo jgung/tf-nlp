@@ -13,6 +13,7 @@
     "map_with_regex": true,
     "label_mappings": {
       "gold": {
+        "^(?:[RC]-)?V$": "V",
         "^(?:[RC]-)?(?:ARG(M)-)?\\S+$": "ARG\\1"
       }
     }
