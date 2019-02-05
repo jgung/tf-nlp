@@ -12,10 +12,22 @@
     "pred_end": 1,
     "map_with_regex": true,
     "label_mappings": {
-      "gold": {
-        "^(?:[RC]-)?V$": "V",
-        "^(?:[RC]-)?(?:ARG(M)-)?\\S+$": "ARG\\1"
-      }
+      "gold": [
+        [
+          "^([RC]-)?(?:ARGM-)?(\\S+)$",
+          "\\1\\2"
+        ]
+      ],
+      "argtype": [
+        [
+          "^(?:[RC]-)?V$",
+          "V"
+        ],
+        [
+          "^(?:[RC]-)?(?:ARG(M)-)?\\S+$",
+          "ARG\\1"
+        ]
+      ]
     }
   },
   "checkpoint_steps": 10240,

@@ -12,9 +12,12 @@
     "pred_end": 1,
     "map_with_regex": true,
     "label_mappings": {
-      "gold": {
-        "^([RC]-)?(?:ARGM-)?(\\S+)$": "\\1\\2"
-      }
+      "gold": [
+        [
+          "^([RC]-)?(?:ARGM-)?(\\S+)$",
+          "\\1\\2"
+        ]
+      ]
     }
   },
   "checkpoint_steps": 10240,
