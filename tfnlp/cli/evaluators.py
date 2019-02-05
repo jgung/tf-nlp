@@ -118,7 +118,7 @@ def srl_evaluator(labeled_instances, results, output_path=None, target_key=None,
         eval_log.write('\n%s\n\n' % result.confusion_matrix())
 
 
-def srl_ft_mtl_evaluator(labeled_instances, results, output_path=None, target_key=None, type_key='argtype'):
+def srl_ft_mtl_evaluator(labeled_instances, results, output_path=None, target_key=None, script_path=None, type_key='argtype'):
     # predicted/gold function tag label
     predicted_labels, gold_labels = [], []
     # predicted/gold core vs. adjunct
