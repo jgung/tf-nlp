@@ -20,10 +20,11 @@
       ]
     }
   },
-  "checkpoint_steps": 10240,
+  "checkpoint_steps": 5120,
   "patience": 102480,
   "max_steps": 1000000,
   "batch_size": 32,
+  "ema_decay": 0.999,
   "optimizer": {
     "name": "Adadelta",
     "params": {
