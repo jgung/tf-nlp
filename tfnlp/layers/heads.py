@@ -8,7 +8,7 @@ from tensorflow.python.ops.lookup_ops import index_to_string_table_from_file
 
 from tfnlp.common import constants
 from tfnlp.common.config import append_label
-from tfnlp.common.eval import ClassifierEvalHook, SequenceEvalHook, SrlEvalHook
+from tfnlp.common.eval_hooks import ClassifierEvalHook, SequenceEvalHook, SrlEvalHook
 from tfnlp.common.metrics import tagger_metrics
 from tfnlp.common.training_utils import smoothed_labels
 from tfnlp.layers.layers import string2index
@@ -142,7 +142,7 @@ class ClassifierHead(ModelHead):
                     constants.SENTENCE_INDEX: self.features[constants.SENTENCE_INDEX],
                 },
                 vocab=self.extractor,
-                output_file=self.params.output
+                output_dir=self.params.job_dir
             )
         ]
 
@@ -273,7 +273,7 @@ class TaggerHead(ModelHead):
                     eval_update=tf.assign(self.metric, eval_placeholder),
                     eval_placeholder=eval_placeholder,
                     output_confusions=self.params.verbose_eval,
-                    output_file=self.params.output
+                    output_dir=self.params.job_dir
                 )
             )
         else:
@@ -291,6 +291,6 @@ class TaggerHead(ModelHead):
                     predict_key=predictions_key,
                     eval_update=tf.assign(self.metric, eval_placeholder),
                     eval_placeholder=eval_placeholder,
-                    output_file=self.params.output
+                    output_dir=self.params.job_dir
                 )
             )

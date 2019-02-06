@@ -9,19 +9,15 @@ import tensorflow as tf
 from nltk import ConfusionMatrix
 from tensorflow.python.lib.io import file_io
 from tensorflow.python.lib.io.file_io import get_matching_files
-from tensorflow.python.training import session_run_hook
-from tensorflow.python.training.session_run_hook import SessionRunArgs
 
 from tfnlp.common.chunk import chunk
 from tfnlp.common.conlleval import conll_eval_lines
-from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, LABEL_KEY, LENGTH_KEY, MARKER_KEY, PREDICT_KEY, REL_PROBS, \
-    SENTENCE_INDEX
 from tfnlp.common.parsing import nonprojective
 from tfnlp.common.srleval import evaluate
-from tfnlp.common.utils import binary_np_array_to_unicode
 
 SUMMARY_FILE = 'eval-summary.tsv'
 EVAL_LOG = 'eval.log'
+PREDICTIONS_FILE = 'predictions.txt'
 
 
 def conll_eval(gold_batches, predicted_batches, indices, output_file=None):
@@ -134,6 +130,27 @@ def write_props_to_file(output_file, labels, markers, sentence_ids):
             _write_props(props_by_predicate, predicates)
 
 
+def append_srl_prediction_output(identifier, result, output_dir, output_confusions=False):
+    summary_file = os.path.join(output_dir, SUMMARY_FILE)
+    exists = tf.gfile.Exists(summary_file)
+
+    p, r, f1 = result.evaluation.prec_rec_f1()
+
+    with file_io.FileIO(summary_file, 'a') as summary:
+        if not exists:
+            summary.write('ID\t# Props\t% Perfect\tPrecision\tRecall\tF1\n')
+        summary.write('%s\t%d\t%f\t%f\t%f\t%f\n' % (identifier,
+                                                    result.ntargets,
+                                                    result.perfect_props(),
+                                                    p, r, f1))
+
+    with file_io.FileIO(os.path.join(output_dir, EVAL_LOG), 'a') as eval_log:
+        eval_log.write('\nID: %s\n' % identifier)
+        eval_log.write(str(result) + '\n')
+        if output_confusions:
+            eval_log.write('\n%s\n\n' % result.confusion_matrix())
+
+
 def accuracy_eval(gold_batches, predicted_batches, indices, output_file=None):
     gold = []
     test = []
@@ -159,179 +176,6 @@ def accuracy_eval(gold_batches, predicted_batches, indices, output_file=None):
     accuracy = correct / total
     tf.logging.info("Accuracy: %f (%d/%d)" % (accuracy, correct, total))
     return accuracy
-
-
-class EvalHook(session_run_hook.SessionRunHook):
-    def __init__(self, tensors, vocab, label_key=LABEL_KEY, predict_key=PREDICT_KEY, output_file=None):
-        """
-        Initialize a `SessionRunHook` used to perform off-graph evaluation of sequential predictions.
-        :param tensors: dictionary of batch-sized tensors necessary for computing evaluation
-        :param vocab: label feature vocab
-        :param label_key: targets key in `tensors`
-        :param predict_key: predictions key in `tensors`
-        :param output_file: optional output file name for predictions
-        """
-        self._fetches = tensors
-        self._vocab = vocab
-        self._label_key = label_key
-        self._predict_key = predict_key
-        self._output_file = output_file
-
-        self._predictions = None
-        self._gold = None
-        self._indices = None
-
-    def begin(self):
-        self._predictions = []
-        self._gold = []
-        self._indices = []
-
-    def before_run(self, run_context):
-        return SessionRunArgs(fetches=self._fetches)
-
-    def after_run(self, run_context, run_values):
-        self._indices.extend(run_values.results[SENTENCE_INDEX])
-
-
-class ClassifierEvalHook(EvalHook):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def after_run(self, run_context, run_values):
-        super().after_run(run_context, run_values)
-        self._gold.append((self._vocab.index_to_feat(gold) for gold in run_values.results[self._label_key]))
-        self._predictions.append((self._vocab.index_to_feat(prediction) for prediction in run_values.results[self._predict_key]))
-
-    def end(self, session):
-        accuracy_eval(self._gold, self._predictions, self._indices, output_file=self._output_file)
-
-
-class SequenceEvalHook(EvalHook):
-
-    def __init__(self, *args, eval_update=None, eval_placeholder=None, **kwargs):
-        """
-        Initialize a `SessionRunHook` used to perform off-graph evaluation of sequential predictions.
-        :param eval_update: operation to update current best score
-        :param eval_placeholder: placeholder for update operation
-        """
-        super().__init__(*args, **kwargs)
-        self._eval_update = eval_update
-        self._eval_placeholder = eval_placeholder
-
-    def after_run(self, run_context, run_values):
-        super().after_run(run_context, run_values)
-        for gold, predictions, seq_len in zip(run_values.results[self._label_key],
-                                              run_values.results[self._predict_key],
-                                              run_values.results[LENGTH_KEY]):
-            self._gold.append([self._vocab.index_to_feat(val) for val in gold][:seq_len])
-            self._predictions.append([self._vocab.index_to_feat(val) for val in predictions][:seq_len])
-
-    def end(self, session):
-        score, result = conll_eval(self._gold, self._predictions, self._indices, self._output_file)
-        tf.logging.info(result)
-        session.run(self._eval_update, feed_dict={self._eval_placeholder: score})
-
-
-class SrlEvalHook(SequenceEvalHook):
-    def __init__(self, *args, output_confusions=False, **kwargs):
-        """
-        Initialize a `SessionRunHook` used to perform off-graph evaluation of sequential predictions.
-        :param output_confusions: display a confusion matrix along with normal outputs
-        """
-        super().__init__(*args, **kwargs)
-        self._output_confusions = output_confusions
-
-        self._markers = None
-
-    def begin(self):
-        super().begin()
-        self._markers = []
-
-    def after_run(self, run_context, run_values):
-        super().after_run(run_context, run_values)
-        for markers, seq_len in zip(run_values.results[MARKER_KEY], run_values.results[LENGTH_KEY]):
-            self._markers.append(binary_np_array_to_unicode(markers[:seq_len]))
-
-    def end(self, session):
-        result = conll_srl_eval(self._gold, self._predictions, self._markers, self._indices)
-        tf.logging.info(str(result))
-
-        p, r, f1 = result.evaluation.prec_rec_f1()
-
-        # update model's best score for early stopping
-        session.run(self._eval_update, feed_dict={self._eval_placeholder: f1})
-
-        if self._output_file:
-            write_props_to_file(self._output_file + '.gold', self._gold, self._markers, self._indices)
-            write_props_to_file(self._output_file, self._predictions, self._markers, self._indices)
-
-            step = session.run(tf.train.get_global_step(session.graph))
-
-            job_dir = os.path.dirname(self._output_file)
-
-            summary_file = os.path.join(job_dir, SUMMARY_FILE)
-            exists = tf.gfile.Exists(summary_file)
-            with file_io.FileIO(summary_file, 'a') as summary:
-                if not exists:
-                    summary.write('Step\tPath\t# Props\t% Perfect\tPrecision\tRecall\tF1\n')
-                summary.write('%d\t%s\t%d\t%f\t%f\t%f\t%f\n' % (step,
-                                                                os.path.basename(self._output_file),
-                                                                result.ntargets,
-                                                                result.perfect_props(),
-                                                                p, r, f1))
-
-            with file_io.FileIO(os.path.join(job_dir, EVAL_LOG), 'a') as eval_log:
-                eval_log.write('\n%d\t%s\n' % (step, os.path.basename(self._output_file)))
-                eval_log.write(str(result) + '\n')
-                if self._output_confusions:
-                    eval_log.write('\n%s\n\n' % result.confusion_matrix())
-
-
-class ParserEvalHook(session_run_hook.SessionRunHook):
-    def __init__(self, tensors, features, script_path, out_path=None, gold_path=None):
-        """
-        Initialize a `SessionRunHook` used to perform off-graph evaluation of sequential predictions.
-        :param tensors: dictionary of batch-sized tensors necessary for computing evaluation
-        :param features: feature vocabularies
-        """
-        self._tensors = tensors
-        self._features = features
-        self._script_path = script_path
-        self._output_path = out_path
-        self._gold_path = gold_path
-        self._arc_probs = None
-        self._arcs = None
-        self._rel_probs = None
-        self._rels = None
-
-    def begin(self):
-        self._arc_probs = []
-        self._rel_probs = []
-        self._rels = []
-        self._arcs = []
-
-    def before_run(self, run_context):
-        return SessionRunArgs(fetches=self._tensors)
-
-    def after_run(self, run_context, run_values):
-        self._rel_probs.extend(run_values.results[REL_PROBS])
-        for arc_probs, rels, heads, seq_len in zip(run_values.results[ARC_PROBS],
-                                                   run_values.results[DEPREL_KEY],
-                                                   run_values.results[HEAD_KEY],
-                                                   run_values.results[LENGTH_KEY]):
-            self._arc_probs.append(arc_probs[:seq_len, :seq_len])
-            self._rels.append(rels[:seq_len])
-            self._arcs.append(heads[:seq_len])
-
-    def end(self, session):
-        parser_write_and_eval(arc_probs=self._arc_probs,
-                              rel_probs=self._rel_probs,
-                              heads=self._arcs,
-                              rels=self._rels,
-                              features=self._features,
-                              out_path=self._output_path,
-                              gold_path=self._gold_path,
-                              script_path=self._script_path)
 
 
 def parser_write_and_eval(arc_probs, rel_probs, heads, rels, script_path, features=None, out_path=None, gold_path=None):
@@ -400,24 +244,6 @@ def write_parse_results_to_conllx_file(heads, rels, file, features=None):
         file.write('\n')
     file.flush()
     file.seek(0)
-
-
-def metric_compare_fn(metric_key):
-    def _metric_compare_fn(best_eval_result, current_eval_result):
-        if not best_eval_result or metric_key not in best_eval_result:
-            raise ValueError(
-                'best_eval_result cannot be empty or no loss %s is found in it.' % metric_key)
-
-        if not current_eval_result or metric_key not in current_eval_result:
-            raise ValueError(
-                'current_eval_result cannot be empty or no loss %s is found in it.', metric_key)
-
-        new = current_eval_result[metric_key]
-        prev = best_eval_result[metric_key]
-        tf.logging.info("Comparing new score with previous best (%f vs. %f)", new, prev)
-        return prev <= new
-
-    return _metric_compare_fn
 
 
 def log_trainable_variables():
