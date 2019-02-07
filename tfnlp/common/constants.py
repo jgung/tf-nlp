@@ -82,6 +82,7 @@ CLASSIFIER_KEY = "classifier"
 TAGGER_KEY = "tagger"
 NER_KEY = "ner"
 SRL_KEY = "srl"
+SRL_FT_KEY = "srl-ft"
 PARSER_KEY = "parser"
 
 # encoder types, that apply a functon to one or more inputs

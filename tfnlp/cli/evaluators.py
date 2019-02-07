@@ -14,6 +14,7 @@ def get_evaluator(head, feature_extractor, output_path, script_path):
     evaluators = {
         constants.TAGGER_KEY: TaggerEvaluator,
         constants.SRL_KEY: srl_evaluator,
+        constants.SRL_FT_KEY: srl_ft_mtl_evaluator,
         constants.NER_KEY: TaggerEvaluator,
         constants.PARSER_KEY: DepParserEvaluator,
     }
@@ -127,8 +128,15 @@ def srl_evaluator(labeled_instances, results, output_path=None, target_key=None)
     append_srl_prediction_output(os.path.basename(output_path), result, job_dir, output_confusions=True)
 
 
-def srl_ft_mtl_evaluator(labeled_instances, results, output_path=None, target_key=constants.LABEL_KEY, script_path=None,
-                         type_key='argtype'):
+class SrlFtMtlEvaluator(Evaluator):
+    def __init__(self, target=None, output_path=None, script_path=None):
+        super().__init__(target, output_path, script_path)
+
+    def __call__(self, labeled_instances, results):
+        srl_ft_mtl_evaluator(labeled_instances, results, constants.LABEL_KEY)
+
+
+def srl_ft_mtl_evaluator(labeled_instances, results, target_key=constants.LABEL_KEY, type_key='argtype'):
     # predicted/gold function tag label
     predicted_labels, gold_labels = [], []
     # predicted/gold core vs. adjunct
