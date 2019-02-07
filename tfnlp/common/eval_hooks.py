@@ -151,18 +151,19 @@ class ParserEvalHook(session_run_hook.SessionRunHook):
                                                    run_values.results[HEAD_KEY],
                                                    run_values.results[LENGTH_KEY]):
             self._arc_probs.append(arc_probs[:seq_len, :seq_len])
-            self._rels.append(rels[:seq_len])
+            self._rels.append(binary_np_array_to_unicode(rels[:seq_len]))
             self._arcs.append(heads[:seq_len])
 
     def end(self, session):
-        parser_write_and_eval(arc_probs=self._arc_probs,
-                              rel_probs=self._rel_probs,
-                              heads=self._arcs,
-                              rels=self._rels,
-                              features=self._features,
-                              out_path=self._output_path,
-                              gold_path=self._gold_path,
-                              script_path=self._script_path)
+        result = parser_write_and_eval(arc_probs=self._arc_probs,
+                                       rel_probs=self._rel_probs,
+                                       heads=self._arcs,
+                                       rels=self._rels,
+                                       script_path=self._script_path,
+                                       features=self._features,
+                                       out_path=self._output_path,
+                                       gold_path=self._gold_path)
+        tf.logging.info('\n%s', result)
 
 
 def metric_compare_fn(metric_key):
