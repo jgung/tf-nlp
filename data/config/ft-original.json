@@ -1,6 +1,6 @@
 {
   "comments": "314,158 in OntoNotes (U) training corpus, 10240 steps w/ batch size of 32 is about 1 epoch, 102480 steps is 10 epochs",
-  "reader": "conll2012",
+  "reader": "conll_2012",
   "checkpoint_steps": 5120,
   "patience": 102480,
   "max_steps": 1000000,
