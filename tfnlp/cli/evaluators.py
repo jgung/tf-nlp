@@ -102,7 +102,8 @@ def srl_evaluator(labeled_instances, results, output_path=None, target_key=None,
     append_srl_prediction_output(os.path.basename(output_path), result, job_dir, output_confusions=True)
 
 
-def srl_ft_mtl_evaluator(labeled_instances, results, output_path=None, target_key=None, script_path=None, type_key='argtype'):
+def srl_ft_mtl_evaluator(labeled_instances, results, output_path=None, target_key=constants.LABEL_KEY, script_path=None,
+                         type_key='argtype'):
     # predicted/gold function tag label
     predicted_labels, gold_labels = [], []
     # predicted/gold core vs. adjunct
