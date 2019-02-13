@@ -1,4 +1,5 @@
 import numbers
+import re
 
 import tensorflow as tf
 from tensorflow.contrib.opt import LazyAdamOptimizer
@@ -24,6 +25,7 @@ class BaseNetworkConfig(Params):
             tf.logging.warn("No 'batch_size' parameter provided. Using default value of %d", self.batch_size)
         self.buffer_size = config.get('buffer_size', 999999)  # in other words, read full dataset into memory by default
         self.batch_buffer_size = config.get('batch_buffer_size', 512)  # number of consecutive batches to shuffle
+        self.dataset_caching = config.get('dataset_caching', True)
 
         self.checkpoint_steps = config.get('checkpoint_steps')
         if not self.checkpoint_steps:
@@ -206,11 +208,30 @@ def get_gradient_clip(network_config, default_val=5.0):
     :param default_val: default clip norm
     :return: clip norm
     """
-    clip = network_config.optimizer.get('clip')
-    if clip is None:
+    if not network_config.optimizer or not network_config.optimizer.get('clip'):
         tf.logging.info("Using default global norm of gradient clipping threshold of %f", default_val)
-        clip = default_val
-    return clip
+        return default_val
+    return network_config.optimizer.get('clip')
+
+
+def get_l2_loss(network_config, variables):
+    if not network_config.optimizer or not network_config.optimizer.get('l2_loss'):
+        return 0
+    l2_loss = network_config.optimizer.get('l2_loss')
+
+    if isinstance(l2_loss, numbers.Number):
+        return tf.add_n([tf.nn.l2_loss(v) for v in variables if 'bias' not in v.name]) * l2_loss
+    if not isinstance(l2_loss, dict):
+        raise ValueError("'l2_loss' expects a dictionary from regular expressions matching variable names to L2 terms,"
+                         " e.g. {\".*scalar.*\": 0.001}, or a single L2 term to be applied globally to non-bias weights.")
+
+    all_losses = []
+    for var_pattern, alpha in l2_loss.items():
+        for var in [v for v in variables if re.match(var_pattern, v.name)]:
+            tf.logging.info('Adding L2 regularization with alpha=%f to %s' % (alpha, var.name))
+            all_losses.append(alpha * tf.nn.l2_loss(var))
+
+    return tf.add_n(all_losses)
 
 
 def train_op_from_config(config, loss):
@@ -218,8 +239,15 @@ def train_op_from_config(config, loss):
     clip_norm = get_gradient_clip(config)
 
     parameters = tf.trainable_variables()
+
+    # optionally add L2 loss to specific weights, or globally
+    l2_loss = get_l2_loss(config, parameters)
+    if l2_loss is not None:
+        loss += l2_loss
+
     gradients = tf.gradients(loss, parameters)
     gradients = tf.clip_by_global_norm(gradients, clip_norm=clip_norm)[0]
+
     return optimizer.apply_gradients(grads_and_vars=zip(gradients, parameters), global_step=tf.train.get_global_step())
 
 

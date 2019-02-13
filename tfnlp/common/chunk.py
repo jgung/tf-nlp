@@ -1,6 +1,74 @@
 import re
+from typing import Iterable, List, Tuple
 
 from tfnlp.common.constants import BEGIN, BEGIN_, CONLL_CONT, CONLL_END, CONLL_START, END, END_, IN, IN_, OUT, SINGLE, SINGLE_
+
+
+def labels_to_spans(labeling: Iterable[str]) -> List[Tuple[str, int, int]]:
+    """
+    Given an IOB/BESIO chunking produce a list of labeled spans--triples of (label, start index, end index exclusive).
+    >>> labels_to_spans(['O', 'B-PER', 'I-PER', 'O', 'B-ORG'])
+    [('PER', 1, 3), ('ORG', 4, 5)]
+
+    :param labeling: list of IOB/BESIO labels
+    :return: list of spans
+    """
+
+    def _start_of_chunk(curr):
+        curr_tag, _ = _get_val_and_tag(curr)
+        return curr_tag in {'S', 'B'}
+
+    def _end_of_chunk(curr):
+        curr_tag, _ = _get_val_and_tag(curr)
+        return curr_tag in {'E', 'S'}
+
+    besio = chunk(labeling, besio=True)
+
+    result = []
+    curr_label, start = None, None
+    for index, label in enumerate(besio):
+        if _start_of_chunk(label):
+            if curr_label:
+                result.append((curr_label, start, index))
+            curr_label, start = _get_val_and_tag(label)[1], index
+        if _end_of_chunk(label):
+            result.append((curr_label, start, index + 1))
+            curr_label = None
+    if curr_label:
+        result.append((curr_label, start, len(besio)))
+
+    return result
+
+
+def spans_to_conll_labels(spans: List[Tuple[str, int, int]], length) -> List[str]:
+    """
+    Convert from span tuples to the CoNLL-2005/2012 chunk format.
+    >>> spans_to_conll_labels([('PER', 1, 3), ('ORG', 4, 5)], length=6)
+    ['*', '(PER*', '*)', '*', '(ORG*)', '*']
+
+    :param spans: triples consisting of label, start index (inclusive), and end index (exclusive)
+    :param length: number of tokens in original sentence
+    :return: list of corresponding CoNLL-2005/2012 labels
+    """
+    result = []
+    last = 0
+    for label, start, end in spans:
+        result.extend(['*'] * (start - last))
+
+        span_len = end - start
+        first = '(' + label + '*'
+        if span_len == 1:
+            result.append(first + ')')
+        else:
+            result.append(first)
+            result.extend(['*'] * (span_len - 2))
+            result.append('*)')
+
+        last = end
+
+    result.extend(['*'] * (length - len(result)))
+
+    return result
 
 
 def chunk(labeling, besio=False, conll=False):
@@ -131,4 +199,4 @@ def _get_val_and_tag(label):
         return '', ''
     if label == 'O':
         return label, ''
-    return label.split('-')
+    return label.split('-', 1)

@@ -19,7 +19,7 @@ from tfnlp.cli.evaluators import get_evaluator
 from tfnlp.common import constants
 from tfnlp.common.config import get_network_config
 from tfnlp.common.eval_hooks import metric_compare_fn
-from tfnlp.common.logging import set_up_logging
+from tfnlp.common.logging_utils import set_up_logging
 from tfnlp.common.utils import read_json, write_json
 from tfnlp.datasets import make_dataset, padded_batch
 from tfnlp.feature import get_default_buckets, get_feature_extractor, write_features
@@ -39,6 +39,7 @@ class Trainer(object):
     :param resources_dir_path: path to base directory of resources, such as for pre-trained weights
     :param script_file_path: path to official evaluation scripts
     :param model_fn: TF model function ([features, mode, params] -> EstimatorSpec)
+    :param debug: debug mode for training
     """
 
     def __init__(self,
@@ -46,7 +47,8 @@ class Trainer(object):
                  config_json_path: Optional[str] = None,
                  resources_dir_path: Optional[str] = '',
                  script_file_path: Optional[str] = None,
-                 model_fn: Optional[TF_MODEL_FN] = multi_head_model_fn) -> None:
+                 model_fn: Optional[TF_MODEL_FN] = multi_head_model_fn,
+                 debug: bool = False) -> None:
         super().__init__()
         self._job_dir = save_dir_path
 
@@ -55,6 +57,7 @@ class Trainer(object):
         self._resources = resources_dir_path
         self._eval_script_path = script_file_path
         self._model_fn = model_fn
+        self._debug = debug
 
         # read configuration file
         self.config_path = os.path.join(self._job_dir, constants.CONFIG_PATH)
@@ -91,6 +94,7 @@ class Trainer(object):
         if not os.path.exists(estimator.eval_dir()):
             os.makedirs(estimator.eval_dir())
 
+        hooks = []
         early_stopping = stop_if_no_increase_hook(
             estimator,
             metric_name=self._training_config.metric,
@@ -100,10 +104,16 @@ class Trainer(object):
             # reduce how often we check if we should stop to when it makes sense--when we evaluate
             run_every_steps=self._training_config.checkpoint_steps,
         )
+        hooks.append(early_stopping)
+        if self._debug:
+            debug = tf.train.ProfilerHook(save_steps=10,
+                                          output_dir=self._job_dir,
+                                          show_memory=True)
+            hooks.append(debug)
 
         train_spec = tf.estimator.TrainSpec(self._input_fn(train, True),
                                             max_steps=self._training_config.max_steps,
-                                            hooks=[early_stopping])
+                                            hooks=hooks)
 
         exporter = BestExporter(serving_input_receiver_fn=self._serving_input_fn,
                                 compare_fn=metric_compare_fn(self._training_config.metric),
@@ -200,18 +210,15 @@ class Trainer(object):
 
     def _init_feature_extractor(self, train_path: str = None):
         self._feature_extractor = get_feature_extractor(self._training_config.features)
-        if train_path:
-            tf.logging.info("Checking for pre-existing vocabulary at vocabulary at %s", self._vocab_path)
-            if self._feature_extractor.read_vocab(self._vocab_path):
-                tf.logging.info("Loaded pre-existing vocabulary at %s", self._vocab_path)
-            else:
-                tf.logging.info("No valid pre-existing vocabulary found at %s "
-                                "(this is normal when not loading from an existing model)", self._vocab_path)
-                self._train_vocab(train_path)
-        else:
-            tf.logging.info("Checking for pre-existing vocabulary at vocabulary at %s", self._vocab_path)
-            self._feature_extractor.read_vocab(self._vocab_path)
+        tf.logging.info("Checking for pre-existing vocabulary at vocabulary at %s", self._vocab_path)
+        if self._feature_extractor.read_vocab(self._vocab_path):
             tf.logging.info("Loaded pre-existing vocabulary at %s", self._vocab_path)
+        elif train_path:
+            tf.logging.info("No valid pre-existing vocabulary found at %s "
+                            "(this is normal when not loading from an existing model)", self._vocab_path)
+            self._train_vocab(train_path)
+        else:
+            raise ValueError('No feature vocabulary available at %s and unable to train new vocabulary' % self._vocab_path)
 
     def _extract_raw(self, path: str, test: bool = False):
         # TODO: allow for separate test reader configuration
@@ -220,13 +227,14 @@ class Trainer(object):
         raw_instances = reader.read_file(path)
 
         if not raw_instances:
-            raise ValueError("No examples provided at path given by '{}'".format(path))
+            raise ValueError("No examples provided at path given by '%s'" % path)
         return raw_instances
 
     def _train_vocab(self, train_path: str):
-        tf.logging.info("Training new vocabulary using training data at %s", train_path)
+        tf.logging.info("Creating new vocabulary using training data at %s", train_path)
         self._feature_extractor.initialize(self._resources)
         self._feature_extractor.train(self._extract_raw(train_path))
+        tf.logging.info("Writing new feature/label vocabulary to %s", self._vocab_path)
         self._feature_extractor.write_vocab(self._vocab_path, resources=self._resources, prune=True)
 
     def _extract_features(self, path: str, test: bool = False):
@@ -237,7 +245,7 @@ class Trainer(object):
     def _extract_and_write(self, path: str, test: bool = False):
         output_path = self._data_path_fn(path)
         if tf.gfile.Exists(output_path):
-            tf.logging.info("Using existing features for %s from %s", path, output_path)
+            tf.logging.info("Using pre-existing features for %s from %s", path, output_path)
             return
         examples = self._extract_features(path, test)
         tf.logging.info("Writing extracted features from %s for %d instances to %s", path, len(examples), output_path)
@@ -287,7 +295,8 @@ class Trainer(object):
                                     evaluate=not train,
                                     bucket_sizes=bucket_sizes,
                                     buffer_size=self._training_config.buffer_size,
-                                    batch_buffer_size=self._training_config.batch_buffer_size)
+                                    batch_buffer_size=self._training_config.batch_buffer_size,
+                                    caching=self._training_config.dataset_caching)
 
 
 TRAINING_MODES = {'train', 'predict', 'test', 'itl'}
@@ -305,6 +314,8 @@ def default_args():
     parser.add_argument('--mode', type=str, default="train", help='(optional) training command, "train" by default',
                         choices=list(TRAINING_MODES))
     parser.add_argument('--script', type=str, help='(optional) evaluation script path')
+    parser.add_argument('--debug', action='store_true', help='Activate profiling/debug mode')
+    parser.set_defaults(debug=False)
     return parser
 
 
@@ -322,7 +333,8 @@ def cli():
     trainer = Trainer(save_dir_path=opts.save,
                       config_json_path=opts.config,
                       resources_dir_path=opts.resources,
-                      script_file_path=opts.script)
+                      script_file_path=opts.script,
+                      debug=opts.debug)
 
     mode = opts.mode
     test_paths = [t for t in opts.test.split(',') if t.strip()] if opts.test else None

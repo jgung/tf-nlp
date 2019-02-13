@@ -1,9 +1,11 @@
 {
+  "comments": "90,750 in CoNLL-2005 training corpus, 1135 steps w/ batch size of 80 is ~1 epoch",
   "reader": "conll_2005",
-  "checkpoint_steps": 2000,
-  "patience": 500000,
+  "checkpoint_steps": 1135,
+  "patience": 200000,
   "max_steps": 500000,
   "batch_size": 80,
+  "ema_decay": 0.999,
   "optimizer": {
     "name": "Adadelta",
     "params": {
@@ -27,10 +29,6 @@
     ],
     "inputs": [
       {
-        "name": "elmo",
-        "key": "word"
-      },
-      {
         "name": "word",
         "key": "word",
         "mapping_funcs": [
@@ -48,6 +46,12 @@
         }
       },
       {
+        "name": "predicate_index",
+        "key": "predicate_index",
+        "numeric": true,
+        "rank": 1
+      },
+      {
         "name": "marker",
         "key": "marker",
         "config": {
@@ -63,31 +67,33 @@
   },
   "encoders": [
     {
-      "name": "words_and_chars",
+      "name": "tokens",
       "type": "concat",
       "inputs": [
         "word",
-        "elmo",
         "marker"
       ],
       "input_dropout": 0.0
     },
     {
-      "name": "blstm",
+      "name": "alternating_lstm",
       "inputs": [
-        "words_and_chars"
+        "tokens"
       ],
       "type": "dblstm",
       "state_size": 300,
-      "encoder_output_dropout": 0.1,
+      "encoder_dropout": 0.1,
       "encoder_layers": 8
     }
   ],
   "heads": [
     {
-      "encoder": "blstm",
+      "encoder": "alternating_lstm",
       "name": "gold",
-      "type": "srl"
+      "type": "biaffine-srl",
+      "mlp_dim": 200,
+      "mlp_dropout": 0.1,
+      "label_smoothing": 0.1
     }
   ]
 }

@@ -5,10 +5,11 @@ from collections import defaultdict
 
 from tensorflow.python.lib.io import file_io
 
+from tfnlp.common import constants
 from tfnlp.common.chunk import chunk, convert_conll_to_bio, end_of_chunk, start_of_chunk
 from tfnlp.common.constants import CHUNK_KEY, DEPREL_KEY, ENHANCED_DEPS_KEY, FEAT_KEY, HEAD_KEY, ID_KEY, INSTANCE_INDEX, \
     LABEL_KEY, LEMMA_KEY, MARKER_KEY, MISC_KEY, NAMED_ENTITY_KEY, PARSE_KEY, PDEPREL_KEY, PFEAT_KEY, PHEAD_KEY, PLEMMA_KEY, \
-    POS_KEY, PPOS_KEY, PREDICATE_KEY, SENSE_KEY, SENTENCE_INDEX, TOKEN_INDEX_KEY, WORD_KEY, XPOS_KEY
+    POS_KEY, PPOS_KEY, PREDICATE_KEY, SENSE_KEY, SENTENCE_INDEX, TOKEN_INDEX_KEY, WORD_KEY, XPOS_KEY, PREDICATE_INDEX_KEY
 from tfnlp.common.utils import Params
 
 
@@ -127,7 +128,10 @@ class ConllReader(object):
         sentence = defaultdict(list)
         for row in rows:
             for index, val in self._index_field_map.items():
-                sentence[val].append(row[index])
+                value = row[index]
+                if WORD_KEY == val:
+                    value = unescape_ptb(value)
+                sentence[val].append(value)
         # noinspection PyTypeChecker
         sentence[SENTENCE_INDEX] = self._sentence_count
         self._sentence_count += 1
@@ -248,7 +252,9 @@ class ConllSrlReader(ConllReader):
             instance[MARKER_KEY] = [index == predicate_index and '1' or '0' for index in range(0, len(all_labels[LABEL_KEY]))]
             instance[SENSE_KEY] = [instance[SENSE_KEY][predicate_index] if index == predicate_index else '-'
                                    for index in range(0, len(all_labels[LABEL_KEY]))]
-            instance[TOKEN_INDEX_KEY] = predicate_index
+            instance[PREDICATE_INDEX_KEY] = predicate_index
+            instance[constants.PREDICATE_LEMMA] = instance[self._predicate_key]
+            instance[constants.PREDICATE_FORM] = instance[WORD_KEY][predicate_index]
             instance[INSTANCE_INDEX] = self.prop_count
             instances.append(instance)
             self.prop_count += 1
@@ -549,9 +555,33 @@ def conll2semlink(conll_path, out_file, reader=None):
                 if ' ' in word:
                     print('A space ' ' was found in a token in an instance w/ text: %s' % text)
             sense = instance[SENSE_KEY]
-            token = instance[TOKEN_INDEX_KEY]
+            token = instance[PREDICATE_INDEX_KEY]
             sentence = instance[INSTANCE_INDEX]
             # noinspection PyTypeChecker
             predicate = instance[PREDICATE_KEY][token]
             # noinspection PyStringFormat
             out.write('%s %d %d %s %s\t%s\n' % (conll_path, sentence, token, predicate, sense, text))
+
+
+PTB_MAPPINGS = {
+    '-LRB-': '(',
+    '-RRB-': ')',
+    '-LCB-': '{',
+    '-RCB-': '}',
+    '-LSB-': '[',
+    '-RSB-': ']',
+    '\'\'': '\"',
+    '``': '\"',
+}
+
+
+def unescape_ptb(ptb_token: str) -> str:
+    """
+    Convert PTB-style token back to original form.
+    >>> unescape_ptb('-LRB-')
+    '('
+
+    :param ptb_token: PTB-style token
+    :return: un-PTB-escaped token
+    """
+    return PTB_MAPPINGS.get(ptb_token, ptb_token)
