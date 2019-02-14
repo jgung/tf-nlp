@@ -14,14 +14,13 @@ def get_evaluator(head, feature_extractor, output_path, script_path):
     evaluators = {
         constants.TAGGER_KEY: TaggerEvaluator,
         constants.SRL_KEY: SrlEvaluator,
-        constants.BIAFFINE_SRL_KEY: SrlEvaluator,
         constants.SRL_FT_KEY: SrlFtMtlEvaluator,
         constants.NER_KEY: TaggerEvaluator,
         constants.PARSER_KEY: DepParserEvaluator,
     }
-    if head.type not in evaluators:
-        raise ValueError("Unsupported head type: " + head.type)
-    return evaluators[head.type](target=feature_extractor.targets[head.name],
+    if head.task not in evaluators:
+        raise ValueError("Unsupported head type: " + head.task)
+    return evaluators[head.task](target=feature_extractor.targets[head.name],
                                  output_path=output_path,
                                  script_path=script_path)
 
