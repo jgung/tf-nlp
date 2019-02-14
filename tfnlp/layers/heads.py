@@ -262,6 +262,7 @@ class TaggerHead(ModelHead):
                 self.evaluation_hooks.append(SrlEvalHook(**eval_params))
             elif self.config.task == constants.SRL_FT_KEY:
                 mappings = self.config.mappings
+                eval_tensors[constants.SRL_FT_KEY] = self.features[constants.SRL_FT_KEY]
                 self.evaluation_hooks.append(SrlFtEvalHook(mappings=mappings, **eval_params))
         else:
             # normal tagging task, use tagger evaluation hook
