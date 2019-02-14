@@ -4,6 +4,7 @@ import tensorflow as tf
 from tensorflow.python.training import session_run_hook
 from tensorflow.python.training.session_run_hook import SessionRunArgs
 
+from tfnlp.common import constants
 from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS
 from tfnlp.common.constants import LABEL_KEY, LENGTH_KEY, MARKER_KEY, SENTENCE_INDEX
 from tfnlp.common.eval import PREDICTIONS_FILE, append_srl_prediction_output
@@ -116,6 +117,58 @@ class SrlEvalHook(SequenceEvalHook):
 
             step = session.run(tf.train.get_global_step(session.graph))
             append_srl_prediction_output(str(step), result, self._output_dir, output_confusions=self._output_confusions)
+
+
+class SrlFtEvalHook(SrlEvalHook):
+    """
+    Eval hook for SRL using deterministically mapped labels.
+    :param mappings: mapping dictionary from original labels to valid predicted (mapped) labels
+    """
+
+    def __init__(self, mappings: dict, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # update mappings with reference, continuation, and BIO labeling
+        augmented = {**mappings}
+        for key, val in mappings.items():
+            if not 'C-' + key in mappings:
+                augmented['C-' + key] = 'C-' + val
+            if not 'R-' + key in mappings:
+                augmented['R-' + key] = 'R-' + val
+        self.mappings = {**augmented}
+        for key, val in augmented.items():
+            mappings['B-' + key] = 'B-' + val
+            mappings['I-' + key] = 'I-' + val
+
+        self._original_labels = None
+
+    def begin(self):
+        super().begin()
+        self._original_labels = []
+
+    def after_run(self, run_context, run_values):
+        super().after_run(run_context, run_values)
+        for labels, seq_len in zip(run_values.results[constants.SRL_FT_KEY], run_values.results[LENGTH_KEY]):
+            self._original_labels.append(binary_np_array_to_unicode(labels[:seq_len]))
+
+    def end(self, session):
+        unmapped = []
+        for mapped_seq, original_seq in zip(self._predictions, self._original_labels):
+            unmapped_sentence = []
+            for mapped_label, original_label in zip(mapped_seq, original_seq):
+                if mapped_label == self.mappings.get(original_label, original_label):
+                    mapped_label = original_label
+                unmapped_sentence.append(mapped_label)
+            unmapped.append(unmapped_sentence)
+
+        # evaluate on mapped label set
+        result = conll_srl_eval(self._gold, self._predictions, self._markers, self._indices)
+        tf.logging.info(str(result))
+
+        # now run evaluation on original label set
+        self._gold = self._original_labels
+        self._predictions = unmapped
+        super().end(session)
 
 
 class ParserEvalHook(session_run_hook.SessionRunHook):

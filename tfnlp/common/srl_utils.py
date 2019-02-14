@@ -401,11 +401,16 @@ def main(opts):
                                              combine_modifiers=opts.combine,
                                              append=opts.append)
         if opts.mappings:
-            mapped = json_mappings.get(mapped, r)
+            result = json_mappings.get(mapped, r)
+        else:
+            result = mapped
+
         if opts.concat:
+            return mapped + '||' + result
+        elif opts.concat_original:
             return r + '||' + mapped
 
-        return mapped
+        return result
 
     if opts.mappings:
         tag = os.path.splitext(os.path.basename(opts.mappings))[0]
@@ -448,6 +453,7 @@ if __name__ == '__main__':
                            help='Mode to apply mappings')
     argparser.add_argument('--mappings', type=str, help='Path to JSON mappings file')
     argparser.add_argument('--concat', action='store_true', help='Concat mapped label with original label using "||"')
+    argparser.add_argument('--concat_original', action='store_true', help='Concat original mapped label')
     argparser.set_defaults(append=False)
     argparser.set_defaults(combine=False)
     argparser.set_defaults(concat=False)

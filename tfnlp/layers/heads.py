@@ -7,7 +7,7 @@ from tensorflow.python.ops.lookup_ops import index_to_string_table_from_file
 
 from tfnlp.common import constants
 from tfnlp.common.config import append_label
-from tfnlp.common.eval_hooks import ClassifierEvalHook, SequenceEvalHook, SrlEvalHook
+from tfnlp.common.eval_hooks import ClassifierEvalHook, SequenceEvalHook, SrlEvalHook, SrlFtEvalHook
 from tfnlp.common.metrics import tagger_metrics
 from tfnlp.layers.layers import string2index
 from tfnlp.layers.util import get_shape, mlp, bilinear, select_logits, sequence_loss
@@ -243,39 +243,35 @@ class TaggerHead(ModelHead):
         # https://github.com/tensorflow/tensorflow/issues/20418 -- metrics don't accept variables, so we create a tensor
         eval_placeholder = tf.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
 
-        if constants.SRL_KEY in self.config.task:
-            eval_tensors[constants.MARKER_KEY] = self.features[constants.MARKER_KEY]
+        eval_params = {
+            "tensors": eval_tensors,
+            "vocab": self.extractor,
+            "label_key": labels_key,
+            "predict_key": predictions_key,
+            "eval_update": tf.assign(self.metric, eval_placeholder),
+            "eval_placeholder": eval_placeholder,
+            "output_dir": self.params.job_dir
+        }
 
-            self.evaluation_hooks.append(
-                SrlEvalHook(
-                    tensors=eval_tensors,
-                    vocab=self.extractor,
-                    label_key=labels_key,
-                    predict_key=predictions_key,
-                    eval_update=tf.assign(self.metric, eval_placeholder),
-                    eval_placeholder=eval_placeholder,
-                    output_confusions=self.params.verbose_eval,
-                    output_dir=self.params.job_dir
-                )
-            )
+        if constants.SRL_KEY in self.config.task:
+            # semantic role labeling task, use SRL evaluation hooks
+            eval_tensors[constants.MARKER_KEY] = self.features[constants.MARKER_KEY]
+            eval_params["output_confusions"] = self.params.verbose_eval
+
+            if self.config.task == constants.SRL_KEY:
+                self.evaluation_hooks.append(SrlEvalHook(**eval_params))
+            elif self.config.task == constants.SRL_FT_KEY:
+                mappings = self.config.mappings
+                self.evaluation_hooks.append(SrlFtEvalHook(mappings=mappings, **eval_params))
         else:
+            # normal tagging task, use tagger evaluation hook
             ns = None if self.name == constants.LABEL_KEY else self.name
             metrics = tagger_metrics(labels=self.targets, predictions=tf.cast(self.predictions, dtype=tf.int64), ns=ns)
             self.metric_ops.update(metrics)
             acc_key = append_label(constants.ACCURACY_METRIC_KEY, self.name)
             self.metric_ops[acc_key] = tf.metrics.accuracy(labels=self.targets, predictions=self.predictions, name=acc_key)
 
-            self.evaluation_hooks.append(
-                SequenceEvalHook(
-                    tensors=eval_tensors,
-                    vocab=self.extractor,
-                    label_key=labels_key,
-                    predict_key=predictions_key,
-                    eval_update=tf.assign(self.metric, eval_placeholder),
-                    eval_placeholder=eval_placeholder,
-                    output_dir=self.params.job_dir
-                )
-            )
+            self.evaluation_hooks.append(SequenceEvalHook(**eval_params))
 
 
 class BiaffineSrlHead(TaggerHead):

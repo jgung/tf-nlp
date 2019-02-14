@@ -8,6 +8,7 @@ def get_parser(config):
     parsers = {
         constants.TAGGER_KEY: default_parser,
         constants.SRL_KEY: srl_parser,
+        constants.SRL_FT_KEY: srl_parser,
         constants.NER_KEY: default_parser,
         constants.PARSER_KEY: dep_input_parser,
     }
