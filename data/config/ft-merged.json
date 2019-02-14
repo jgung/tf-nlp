@@ -1,0 +1,119 @@
+{
+  "comments": "280,729 in OntoNotes-V training corpus, 3510 steps w/ batch size of 80 is ~1 epoch",
+  "reader": {
+    "field_index_map": {
+      "word": 3,
+      "pos": 4,
+      "parse": 5,
+      "predicate": 6,
+      "sense": 7
+    },
+    "pred_start": 11,
+    "pred_end": 1,
+    "map_with_regex": true,
+    "label_mappings": {
+      "gold": [
+        [
+          "^(\\S+)\\|\\|(\\S+)$",
+          "\\2"
+        ]
+      ],
+      "original": [
+        [
+          "^(\\S+)\\|\\|(\\S+)$",
+          "\\1"
+        ]
+      ]
+    }
+  },
+  "checkpoint_steps": 3510,
+  "patience": 200000,
+  "max_steps": 500000,
+  "batch_size": 80,
+  "ema_decay": 0.999,
+  "optimizer": {
+    "name": "Adadelta",
+    "params": {
+      "epsilon": 1e-6
+    },
+    "lr": 1.0,
+    "clip": 1.0,
+    "l2_loss": {
+      ".*module/aggregation/weights.*": 0.001
+    }
+  },
+  "features": {
+    "seq_feat": "gold",
+    "targets": [
+      {
+        "name": "gold",
+        "key": "gold",
+        "threshold": 10,
+        "indices": {
+          "O": 0
+        },
+        "unknown_word": "O",
+        "pad_word": "O"
+      },
+      {
+        "name": "original",
+        "key": "original",
+        "indices": {
+          "O": 0
+        },
+        "unknown_word": "O",
+        "pad_word": "O"
+      }
+    ],
+    "inputs": [
+      {
+        "name": "elmo",
+        "key": "word",
+        "config": {
+          "dropout": 0.1
+        }
+      },
+      {
+        "name": "marker",
+        "key": "marker",
+        "config": {
+          "dim": 100
+        },
+        "indices": {
+          "0": 0
+        },
+        "unknown_word": "0",
+        "pad_word": "0"
+      }
+    ]
+  },
+  "encoders": [
+    {
+      "name": "tokens",
+      "type": "concat",
+      "inputs": [
+        "elmo",
+        "marker"
+      ],
+      "input_dropout": 0.0
+    },
+    {
+      "name": "alternating_lstm",
+      "inputs": [
+        "tokens"
+      ],
+      "type": "dblstm",
+      "state_size": 300,
+      "encoder_dropout": 0.1,
+      "encoder_layers": 8
+    }
+  ],
+  "heads": [
+    {
+      "encoder": "alternating_lstm",
+      "name": "gold",
+      "type": "srl",
+      "label_smoothing": 0.1
+    }
+  ]
+}
