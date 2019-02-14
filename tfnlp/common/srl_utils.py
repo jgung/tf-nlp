@@ -389,29 +389,23 @@ def _add_c_r_mappings(mappings: Dict[str, str]) -> Dict[str, str]:
 def main(opts):
     mappings = get_argument_function_mappings(opts.frames)
 
-    def mapping_fn(rs, r):
-        r = arg_to_a(r)
-        return apply_numbered_arg_mappings(rs, r, mappings,
-                                           ignore_unmapped=True,
-                                           combine_modifiers=opts.combine,
-                                           append=opts.append)
-
-    mapping_function = mapping_fn
     if opts.mappings:
         # apply additional mappings to the output of the mapping function, returning original label if not mapped
         json_mappings = _add_c_r_mappings(read_json(opts.mappings))
 
-        def updated_mapping_fn(rs, r):
-            r = arg_to_a(r)
+    def mapping_fn(rs, r):
+        r = arg_to_a(r)
 
-            mapped = apply_numbered_arg_mappings(rs, r, mappings,
-                                                 ignore_unmapped=True,
-                                                 combine_modifiers=opts.combine,
-                                                 append=opts.append)
+        mapped = apply_numbered_arg_mappings(rs, r, mappings,
+                                             ignore_unmapped=True,
+                                             combine_modifiers=opts.combine,
+                                             append=opts.append)
+        if opts.mappings:
+            mapped = json_mappings.get(mapped, r)
+        if opts.concat:
+            return r + '||' + mapped
 
-            return json_mappings.get(mapped, r)
-
-        mapping_function = updated_mapping_fn
+        return mapped
 
     if opts.mappings:
         tag = os.path.splitext(os.path.basename(opts.mappings))[0]
@@ -426,9 +420,9 @@ def main(opts):
         os.makedirs(opts.output)
 
     mode_map = {
-        'map': CoNllArgMapper(mapping_function, opts.output, tag=tag),
-        'count': CoNllArgCounter(mapping_function, opts.output, tag=tag),
-        'phrases': CoNllPhraseWriter(mapping_function, opts.output, tag=tag)
+        'map': CoNllArgMapper(mapping_fn, opts.output, tag=tag),
+        'count': CoNllArgCounter(mapping_fn, opts.output, tag=tag),
+        'phrases': CoNllPhraseWriter(mapping_fn, opts.output, tag=tag)
     }
 
     mode_map['map'] = AggregateProcessor([mode_map['map'], mode_map['count']], tag=tag)
@@ -453,6 +447,8 @@ if __name__ == '__main__':
     argparser.add_argument('--mode', type=str, default='map', choices=['map', 'count', 'phrases'],
                            help='Mode to apply mappings')
     argparser.add_argument('--mappings', type=str, help='Path to JSON mappings file')
+    argparser.add_argument('--concat', action='store_true', help='Concat mapped label with original label using "||"')
     argparser.set_defaults(append=False)
     argparser.set_defaults(combine=False)
+    argparser.set_defaults(concat=False)
     main(argparser.parse_args())
