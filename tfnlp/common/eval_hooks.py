@@ -137,8 +137,8 @@ class SrlFtEvalHook(SrlEvalHook):
                 augmented['R-' + key] = 'R-' + val
         self.mappings = {**augmented}
         for key, val in augmented.items():
-            mappings['B-' + key] = 'B-' + val
-            mappings['I-' + key] = 'I-' + val
+            self.mappings['B-' + key] = 'B-' + val
+            self.mappings['I-' + key] = 'I-' + val
 
         self._original_labels = None
 
