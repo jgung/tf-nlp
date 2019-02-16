@@ -1,5 +1,4 @@
 import os
-import re
 
 import tensorflow as tf
 from tensorflow.python.training import session_run_hook
@@ -7,7 +6,8 @@ from tensorflow.python.training.session_run_hook import SessionRunArgs
 from tfnlp.common import constants
 from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS
 from tfnlp.common.constants import LABEL_KEY, LENGTH_KEY, MARKER_KEY, SENTENCE_INDEX
-from tfnlp.common.eval import PREDICTIONS_FILE, append_srl_prediction_output
+from tfnlp.common.eval import PREDICTIONS_FILE, append_srl_prediction_output, apply_srl_mappings, convert_to_original, \
+    augment_mapping
 from tfnlp.common.eval import accuracy_eval, conll_eval, conll_srl_eval, write_props_to_file, parser_write_and_eval
 from tfnlp.common.utils import binary_np_array_to_unicode
 
@@ -129,19 +129,8 @@ class SrlFtEvalHook(SrlEvalHook):
 
     def __init__(self, mappings: dict, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         # update mappings with reference, continuation, and BIO labeling
-        augmented = {**mappings}
-        for key, val in mappings.items():
-            if not 'C-' + key in mappings:
-                augmented['C-' + key] = 'C-' + val
-            if not 'R-' + key in mappings:
-                augmented['R-' + key] = 'R-' + val
-        self.mappings = {**augmented}
-        for key, val in augmented.items():
-            self.mappings['B-' + key] = 'B-' + val
-            self.mappings['I-' + key] = 'I-' + val
-
+        self._mappings = augment_mapping(mappings)
         self._original_labels = None
 
     def begin(self):
@@ -154,21 +143,7 @@ class SrlFtEvalHook(SrlEvalHook):
             self._original_labels.append(binary_np_array_to_unicode(labels[:seq_len]))
 
     def end(self, session):
-        unmapped = []
-        for mapped_seq, original_seq in zip(self._predictions, self._original_labels):
-            unmapped_sentence = []
-            for mapped_label, original_label in zip(mapped_seq, original_seq):
-                if mapped_label == self.mappings.get(original_label, original_label):
-                    mapped_label = original_label
-                else:
-                    # if original label is B-A2-GOL and predicted label is B-A2, mark as correct
-                    match = re.match(self.LABEL_EXPR, mapped_label)
-                    if match:
-                        original = re.match(self.LABEL_EXPR, original_label)
-                        if original and match.group(1) == original.group(1):
-                            mapped_label = original_label
-                unmapped_sentence.append(mapped_label)
-            unmapped.append(unmapped_sentence)
+        unmapped = apply_srl_mappings(self._predictions, self._original_labels, self._mappings)
 
         # evaluate on mapped label set
         result = conll_srl_eval(self._gold, self._predictions, self._markers, self._indices)
@@ -177,28 +152,12 @@ class SrlFtEvalHook(SrlEvalHook):
         # now run evaluation on original label set (still split by FT)
         self._gold = self._original_labels
         self._predictions = unmapped
-        super().end(session)
+        result = conll_srl_eval(self._gold, self._predictions, self._markers, self._indices)
+        tf.logging.info(str(result))
 
-        unmapped = []
-        original = []
-        for mapped_seq, original_seq in zip(self._predictions, self._original_labels):
-            unmapped_sentence = []
-            original_sentence = []
-            for mapped_label, original_label in zip(mapped_seq, original_seq):
-                original_match = re.match(self.LABEL_EXPR, original_label)
-                if original_match:
-                    original_label = original_match.group(1)
-                match = re.match(self.LABEL_EXPR, mapped_label)
-                if match:
-                    mapped_label = match.group(1)
-                unmapped_sentence.append(mapped_label)
-                original_sentence.append(original_label)
-            unmapped.append(unmapped_sentence)
-            original.append(original_sentence)
-        self._gold = original
-        self._predictions = unmapped
-
-        # evaluate on original labels
+        # evaluate on original labels, use result for early stopping
+        self._gold = convert_to_original(self._original_labels)
+        self._predictions = convert_to_original(self._predictions)
         super().end(session)
 
 

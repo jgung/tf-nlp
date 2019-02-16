@@ -2,13 +2,13 @@ import os
 import re
 import subprocess
 from collections import defaultdict
+from typing import List, Dict
 
 import numpy as np
 import tensorflow as tf
 from nltk import ConfusionMatrix
 from tensorflow.python.lib.io import file_io
 from tensorflow.python.lib.io.file_io import get_matching_files
-
 from tfnlp.common.chunk import chunk
 from tfnlp.common.conlleval import conll_eval_lines
 from tfnlp.common.parsing import nonprojective
@@ -42,6 +42,74 @@ def conll_eval(gold_batches, predicted_batches, indices, output_file=None):
 
     result = conll_eval_lines(get_lines(), raw=True).to_conll_output()
     return float(re.split('\s+', re.split('\n', result)[1].strip())[7]), result
+
+
+def augment_mapping(mappings: Dict[str, str]) -> Dict[str, str]:
+    """
+    Add IOB/reference/continuation prefixes to a set of PropBank role labels.
+    :param mappings: mapping dictionary
+    :return: new, augmented mapping dictionary
+    """
+    augmented = mappings.copy()
+    for key, val in mappings.items():
+        if not 'C-' + key in mappings:
+            augmented['C-' + key] = 'C-' + val
+        if not 'R-' + key in mappings:
+            augmented['R-' + key] = 'R-' + val
+    result = augmented.copy()
+    for key, val in augmented.items():
+        result['B-' + key] = 'B-' + val
+        result['I-' + key] = 'I-' + val
+    return result
+
+
+LABEL_EXPR = r'^((?:\S+-)?A([\d]))(-[A-Z\d]+)?$'
+
+
+def convert_to_original(split_labels: List[List[str]]) -> List[List[str]]:
+    """
+    Converts a list of label sequences from labels with function tags back to traditional SRL evaluation.
+    :param split_labels: list of label sequences with function tags appended
+    :return: label sequences without function tags
+    """
+    result = []
+    for split_seq in split_labels:
+        seq_result = []
+        for split_label in split_seq:
+            match = re.match(LABEL_EXPR, split_label)
+            if match:
+                split_label = match.group(1)
+            seq_result.append(split_label)
+        result.append(seq_result)
+    return result
+
+
+def apply_srl_mappings(predictions: List[List[str]], split_labels: List[List[str]], mappings: Dict[str, str]) -> List[List[str]]:
+    """
+    Apply SRL mappings for function tag experiments.
+    :param predictions: list of predicted label sequences
+    :param split_labels: list of correctly label sequences (each label split by function tag)
+    :param mappings: mapping from correct labels to valid predictions
+    :return:
+    """
+    result = []
+    for predicted_seq, original_seq in zip(predictions, split_labels):
+        mapped_sentence = []
+        for predicted_label, original_label in zip(predicted_seq, original_seq):
+            # look at the original label to determine if the predicted label is valid
+            if predicted_label == mappings.get(original_label, original_label):
+                # if so, replace the predicted label with the original label
+                predicted_label = original_label
+            else:
+                # if original label is B-A2-GOL and predicted label is B-A2, mark as correct
+                match = re.match(LABEL_EXPR, predicted_label)
+                if match:
+                    original = re.match(LABEL_EXPR, original_label)
+                    if original and match.group(1) == original.group(1):
+                        predicted_label = original_label
+            mapped_sentence.append(predicted_label)
+        result.append(mapped_sentence)
+    return result
 
 
 def conll_srl_eval(gold_batches, predicted_batches, markers, ids):
