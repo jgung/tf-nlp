@@ -78,7 +78,6 @@ def get_number(role: str) -> Optional[str]:
     >>> get_number('C-ARG3')
     '3'
     >>> get_number('ARGM-TMP')
-    None
 
     :param role: role string, e.g. 'ARG4' or 'A4'
     :return: single-character role number string, e.g. '4'
@@ -457,4 +456,5 @@ if __name__ == '__main__':
     argparser.set_defaults(append=False)
     argparser.set_defaults(combine=False)
     argparser.set_defaults(concat=False)
+    argparser.set_defaults(concat_original=False)
     main(argparser.parse_args())

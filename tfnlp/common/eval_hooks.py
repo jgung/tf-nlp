@@ -143,15 +143,13 @@ class SrlFtEvalHook(SrlEvalHook):
             self._original_labels.append(binary_np_array_to_unicode(labels[:seq_len]))
 
     def end(self, session):
-        unmapped = apply_srl_mappings(self._predictions, self._original_labels, self._mappings)
-
         # evaluate on mapped label set
         result = conll_srl_eval(self._gold, self._predictions, self._markers, self._indices)
         tf.logging.info(str(result))
 
         # now run evaluation on original label set (still split by FT)
         self._gold = self._original_labels
-        self._predictions = unmapped
+        self._predictions = apply_srl_mappings(self._predictions, self._original_labels, self._mappings)
         result = conll_srl_eval(self._gold, self._predictions, self._markers, self._indices)
         tf.logging.info(str(result))
 
