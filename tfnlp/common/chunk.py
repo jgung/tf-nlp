@@ -46,7 +46,7 @@ def spans_to_conll_labels(spans: List[Tuple[str, int, int]], length) -> List[str
     >>> spans_to_conll_labels([('PER', 1, 3), ('ORG', 4, 5)], length=6)
     ['*', '(PER*', '*)', '*', '(ORG*)', '*']
 
-    :param spans: triples consisting of label, start index (inclusive), and end index (exclusive)
+    :param spans: sorted triples consisting of label, start index (inclusive), and end index (exclusive)
     :param length: number of tokens in original sentence
     :return: list of corresponding CoNLL-2005/2012 labels
     """
@@ -67,6 +67,32 @@ def spans_to_conll_labels(spans: List[Tuple[str, int, int]], length) -> List[str
         last = end
 
     result.extend(['*'] * (length - len(result)))
+
+    return result
+
+
+def spans_to_iob_labels(spans: List[Tuple[str, int, int]], length) -> List[str]:
+    """
+    Convert from span tuples to the IOB chunk format.
+    >>> spans_to_iob_labels([('PER', 1, 3), ('ORG', 4, 5)], length=6)
+    ['O', 'B-PER', 'I-PER', 'O', 'B-ORG', 'O']
+
+    :param spans: sorted triples consisting of label, start index (inclusive), and end index (exclusive)
+    :param length: number of tokens in original sentence
+    :return: list of corresponding IOB labels
+    """
+    result = []
+    last = 0
+    for label, start, end in spans:
+        result.extend(['O'] * (start - last))
+
+        span_len = end - start
+        result.append('B-' + label)
+        result.extend(['I-' + label] * (span_len - 1))
+
+        last = end
+
+    result.extend(['O'] * (length - len(result)))
 
     return result
 

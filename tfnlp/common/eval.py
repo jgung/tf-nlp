@@ -9,7 +9,7 @@ import tensorflow as tf
 from nltk import ConfusionMatrix
 from tensorflow.python.lib.io import file_io
 from tensorflow.python.lib.io.file_io import get_matching_files
-from tfnlp.common.chunk import chunk
+from tfnlp.common.chunk import chunk, labels_to_spans, spans_to_iob_labels
 from tfnlp.common.conlleval import conll_eval_lines
 from tfnlp.common.parsing import nonprojective
 from tfnlp.common.srleval import evaluate
@@ -63,7 +63,7 @@ def augment_mapping(mappings: Dict[str, str]) -> Dict[str, str]:
     return result
 
 
-LABEL_EXPR = r'^([BI]-(?:[RC]-)?A([\dA]))(-[A-Z\d]+(?:-DSP)?)?$'
+LABEL_EXPR = r'^((?:[BI]-)?(?:[RC]-)?A([\dA]))(-[A-Z\d]+(?:-DSP)?)?$'
 
 
 def convert_to_original(split_labels: List[List[str]]) -> List[List[str]]:
@@ -94,8 +94,19 @@ def apply_srl_mappings(predictions: List[List[str]], split_labels: List[List[str
     """
     result = []
     for predicted_seq, original_seq in zip(predictions, split_labels):
-        mapped_sentence = []
-        for predicted_label, original_label in zip(predicted_seq, original_seq):
+        predicted_spans = {span[1]: span for span in labels_to_spans(predicted_seq)}
+        gold_spans = {span[1]: span for span in labels_to_spans(original_seq)}
+
+        updated_spans = []
+        for token_idx in range(len(original_seq)):
+            if token_idx not in predicted_spans:
+                continue
+            if token_idx not in gold_spans:
+                updated_spans.append(predicted_spans[token_idx])
+                continue
+
+            original_label = gold_spans[token_idx][0]
+            predicted_label, start_idx, end_idx = predicted_spans[token_idx]
             # look at the original label to determine if the predicted label is valid
             if predicted_label == mappings.get(original_label, original_label):
                 # if so, replace the predicted label with the original label
@@ -107,8 +118,11 @@ def apply_srl_mappings(predictions: List[List[str]], split_labels: List[List[str
                     original = re.match(LABEL_EXPR, original_label)
                     if original and match.group(1) == original.group(1):
                         predicted_label = original_label
-            mapped_sentence.append(predicted_label)
-        result.append(mapped_sentence)
+
+            updated_span = (predicted_label, start_idx, end_idx)
+            updated_spans.append(updated_span)
+
+        result.append(spans_to_iob_labels(updated_spans, len(predicted_seq)))
     return result
 
 
