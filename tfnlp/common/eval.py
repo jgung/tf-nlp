@@ -63,7 +63,7 @@ def augment_mapping(mappings: Dict[str, str]) -> Dict[str, str]:
     return result
 
 
-LABEL_EXPR = r'^((?:\S+-)?A([\d]))(-[A-Z\d]+(?:-DSP)?)?$'
+LABEL_EXPR = r'^([BI]-(?:[RC]-)?A([\dA]))(-[A-Z\d]+(?:-DSP)?)?$'
 
 
 def convert_to_original(split_labels: List[List[str]]) -> List[List[str]]:
