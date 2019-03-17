@@ -231,6 +231,7 @@ class SrlProp(object):
             # the phrase continues a started arg
             if continuation_match:
                 label = continuation_match.string[continuation_match.end():]
+                # modify to accept continuation phrases of valid subtype (since we should be able to infer them deterministically)
                 if label in args:
                     pc = a
                     a = args[label]

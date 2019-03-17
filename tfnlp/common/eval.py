@@ -98,31 +98,42 @@ def apply_srl_mappings(predictions: List[List[str]], split_labels: List[List[str
         gold_spans = {span[1]: span for span in labels_to_spans(original_seq)}
 
         updated_spans = []
+        non_continuation_spans = {}
+        continuation_spans = defaultdict(list)
         for token_idx in range(len(original_seq)):
             if token_idx not in predicted_spans:
                 continue
-            if token_idx not in gold_spans:
-                updated_spans.append(predicted_spans[token_idx])
-                continue
 
-            original_label = gold_spans[token_idx][0]
             predicted_label, start_idx, end_idx = predicted_spans[token_idx]
-            # look at the original label to determine if the predicted label is valid
-            if predicted_label == mappings.get(original_label, original_label):
-                # if so, replace the predicted label with the original label
-                predicted_label = original_label
-            else:
-                # if original label is B-A2-GOL and predicted label is B-A2, mark as correct
-                match = re.match(LABEL_EXPR, predicted_label)
-                if match:
+            match = re.match(LABEL_EXPR, predicted_label)
+
+            if token_idx in gold_spans:
+                original_label = gold_spans[token_idx][0]
+                # look at the original label to determine if the predicted label is valid
+                if predicted_label == mappings.get(original_label, original_label):
+                    # if so, replace the predicted label with the original label
+                    predicted_label = original_label
+                elif match:
+                    # if original label is B-A2-GOL and predicted label is B-A2, mark as correct
                     original = re.match(LABEL_EXPR, original_label)
                     if original and match.group(1) == original.group(1):
                         predicted_label = original_label
 
-            updated_span = (predicted_label, start_idx, end_idx)
-            updated_spans.append(updated_span)
+            span = [predicted_label, start_idx, end_idx]
+            if predicted_label.startswith('C-A2'):
+                continuation_spans[match.group(1) if match else predicted_label].append(span)
+            else:
+                non_continuation_spans[match.group(1) if match else predicted_label] = span
+            updated_spans.append(span)
 
-        result.append(spans_to_iob_labels(updated_spans, len(predicted_seq)))
+        for label, spans in continuation_spans.items():
+            label = label[2:]
+            if label in non_continuation_spans:
+                updated_label = 'C-' + non_continuation_spans[label][0]
+                for continuation_span in spans:
+                    continuation_span[0] = updated_label
+
+        result.append(spans_to_iob_labels([(l, s, e) for l, s, e in updated_spans], len(predicted_seq)))
     return result
 
 
