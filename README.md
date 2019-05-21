@@ -74,6 +74,19 @@ To train using ELMo–described in the paper
 [Deep contextualized word representations](https://arxiv.org/abs/1802.05365), 
 use `ner-elmo-config.json` instead of `ner-glove-config.json`.
 
+To train using a model with BERT, described in
+[BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/pdf/1810.04805.pdf)
+use `ner-bert-config.json`:
+```
+INFO:tensorflow:Evaluating on data/datasets/conll03-ner/eng.testb
+INFO:tensorflow:processed 46666 tokens with 5648 phrases; found: 5731 phrases; correct: 5208.
+accuracy:  98.29%; precision:  90.87%; recall:  92.21%; FB1:  91.54
+              LOC: precision:  93.71%; recall:  92.87%; FB1:  93.29  1653
+             MISC: precision:  79.14%; recall:  84.33%; FB1:  81.66  748
+              ORG: precision:  88.24%; recall:  91.27%; FB1:  89.73  1718
+              PER: precision:  96.22%; recall:  95.92%; FB1:  96.07  1612
+```
+
 ### Semantic Role Labeling
 To train a model based on
 [Deep Semantic Role Labeling: What works and what's next](
@@ -100,7 +113,9 @@ You can run the same command to resume training from a saved checkpoint.
 The development F1 score typically reaches between 80 and 81.
 
 For training on CoNLL-2012, you will only need to change the `"reader": "conll_2005"` field in 
-`srl-glove-config.json` to `"reader": "conll_2012"`.
+`srl-glove-config.json` to `"reader": "conll_2012"`, or override it using `--param_overrides reader=conll_2012`.
+
+To train with BERT, use `data/config/srl/srl-bert-config.json` instead of `srl-glove-config.json`.
 
 ### Dependency Parsing
 We also provide an implementation of the graph-based dependency parser described in the paper 
@@ -138,9 +153,10 @@ A script, `./gcloud-train.sh` has been provided to simplify the training process
         --config        Path to .json file used to configure features and model hyper-parameters
         --train         Path to training corpus file
         --valid         Path to validation corpus file
-        --test          Comma-separated list of paths to test files
+        --test          Comma-separated list of paths to test files (optional)
         --bucket        Google Cloud Storage bucket name
         --job-name      Job name (optional)
+        --runtime       Tensorflow runtime version (optional, 1.13 by default)
 ```
 
 Alternatively, follow the [latest instructions](

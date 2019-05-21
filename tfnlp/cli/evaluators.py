@@ -1,7 +1,9 @@
 import os
 
 import tensorflow as tf
+
 from tfnlp.common import constants
+from tfnlp.common.bert import BERT_SUBLABEL
 from tfnlp.common.eval import append_srl_prediction_output, write_props_to_file, apply_srl_mappings, convert_to_original
 from tfnlp.common.eval import conll_eval, conll_srl_eval, parser_write_and_eval
 from tfnlp.common.utils import binary_np_array_to_unicode
@@ -63,7 +65,7 @@ def tagger_evaluator(labeled_instances, results, output_path=None, target_key=No
     gold = []
     indices = []
     for instance, result in zip(labeled_instances, results):
-        labels.append(binary_np_array_to_unicode(result[target_key]))
+        labels.append([label for label in binary_np_array_to_unicode(result[target_key]) if label != BERT_SUBLABEL])
         gold.append(instance[constants.LABEL_KEY])
         indices.append(instance[constants.SENTENCE_INDEX])
     f1, result_str = conll_eval(gold, labels, indices, output_file=output_path)
@@ -117,7 +119,7 @@ def srl_evaluator(labeled_instances, results, output_path=None, target_key=None)
     markers = []
     indices = []
     for instance, result in zip(labeled_instances, results):
-        labels.append(binary_np_array_to_unicode(result[target_key]))
+        labels.append([label for label in binary_np_array_to_unicode(result[target_key]) if label != BERT_SUBLABEL])
         gold.append(instance[constants.LABEL_KEY])
         markers.append(instance[constants.MARKER_KEY])
         indices.append(instance[constants.SENTENCE_INDEX])

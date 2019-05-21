@@ -2,6 +2,7 @@ import numbers
 import re
 
 import tensorflow as tf
+from bert.optimization import AdamWeightDecayOptimizer
 from tensorflow.contrib.opt import LazyAdamOptimizer
 from tensorflow.python.training.learning_rate_decay import exponential_decay, inverse_time_decay
 
@@ -22,7 +23,6 @@ class BaseNetworkConfig(Params):
         self.reader = config.get('reader')
 
         # training hyperparameters
-        self.optimizer = config.get('optimizer')
         self.batch_size = config.get('batch_size')
         if not self.batch_size:
             self.batch_size = 10
@@ -32,17 +32,13 @@ class BaseNetworkConfig(Params):
         self.dataset_caching = config.get('dataset_caching', True)
 
         self.checkpoint_steps = config.get('checkpoint_steps')
-        if not self.checkpoint_steps:
-            self.checkpoint_steps = self.batch_size * 100
-            tf.logging.warn("No 'checkpoint_steps' parameter provided. Using default value of %d", self.checkpoint_steps)
         self.patience = config.get('patience')
-        if not self.patience:
-            self.patience = self.checkpoint_steps * 5
-            tf.logging.warn("No 'patience' parameter provided. Using default value of %d", self.patience)
         self.max_steps = config.get('max_steps')
-        if not self.max_steps:
-            self.max_steps = self.checkpoint_steps * 100
-            tf.logging.warn("No 'max_steps' parameter provided. Using default value of %d", self.max_steps)
+
+        self.max_epochs = config.get('max_epochs')
+        self.patience_epochs = config.get('patience_epochs')
+        self.checkpoint_epochs = config.get('checkpoint_epochs')
+
         self.exports_to_keep = config.get('exports_to_keep', 1)
         self.keep_checkpoints = config.get('checkpoints_to_keep', 1)
 
@@ -78,6 +74,23 @@ class BaseNetworkConfig(Params):
             metrics = [append_label(head.metric, head.name) for head in self.heads]
             self.metric = metrics[0]
 
+        optimizer_config = config.get('optimizer')
+        if optimizer_config:
+            self.optimizer = OptimizerConfig(optimizer_config)
+
+
+class OptimizerConfig(Params):
+    def __init__(self, optimizer_config, **kwargs):
+        super().__init__(**optimizer_config, **kwargs)
+        self.name = optimizer_config.name
+        self.params = optimizer_config.params if optimizer_config.get('params') else {}
+
+        clip = optimizer_config.get('clip')
+        if not clip:
+            clip = 5.0
+            tf.logging.info("Using default global norm of gradient clipping threshold of %f", clip)
+        self.clip = clip
+
 
 class EncoderConfig(Params):
     def __init__(self, config):
@@ -99,6 +112,7 @@ class EncoderConfig(Params):
         self.encoder_output_dropout = config.get('encoder_output_dropout', 0)
         self.encoder_layers = config.get('encoder_layers', 1)
         self.state_size = config.get('state_size', 100)
+        self.sequence_length_key = config.get('sequence_length_key', constants.LENGTH_KEY)
 
         # transformer encoder settings
         self.num_heads = config.get('num_heads', 8)
@@ -120,10 +134,10 @@ class HeadConfig(Params):
 
         self.task = config.get('task')
         if not self.task:
-            task = constants.TAGGER_KEY
+            self.task = constants.TAGGER_KEY
             if 'type' in config:
-                task = _TYPE_TASK_MAP.get(config.type, config.type)
-            tf.logging.warn("No 'task' parameter provided for head %s. Using default of %s", self.name, task)
+                self.task = _TYPE_TASK_MAP.get(config.type, config.type)
+            tf.logging.warn("No 'task' parameter provided for head %s. Using default of %s", self.name, self.task)
 
         self.type = config.get('type')
         if not self.type:
@@ -156,9 +170,41 @@ def get_learning_rate(lr_config, global_step):
         decay = inverse_time_decay(lr, global_step, **lr_config.params)
     elif "vaswani" == name:
         decay = _transformer_learning_rate(lr_config, global_step)
+    elif "bert" == name:
+        decay = _bert_learning_rate(lr_config, global_step)
     else:
         raise ValueError("Unknown learning rate schedule: {}".format(name))
     return decay
+
+
+def _bert_learning_rate(lr_config, global_step):
+    # adapted from https://github.com/google-research/bert/blob/master/optimization.py
+    init_lr = lr_config.rate
+    warmup_steps = int(lr_config.warmup_proportion * lr_config.num_train_steps)
+    learning_rate = tf.constant(value=init_lr, shape=[], dtype=tf.float32)
+    # Implements linear decay of the learning rate.
+    learning_rate = tf.train.polynomial_decay(
+        learning_rate,
+        global_step,
+        lr_config.num_train_steps,
+        end_learning_rate=0.0,
+        power=1.0,
+        cycle=False)
+    # Implements linear warmup. I.e., if global_step < num_warmup_steps, the
+    # learning rate will be `global_step/num_warmup_steps * init_lr`.
+    if warmup_steps:
+        global_steps_int = tf.cast(global_step, tf.int32)
+        warmup_steps_int = tf.constant(warmup_steps, dtype=tf.int32)
+
+        global_steps_float = tf.cast(global_steps_int, tf.float32)
+        warmup_steps_float = tf.cast(warmup_steps_int, tf.float32)
+
+        warmup_percent_done = global_steps_float / warmup_steps_float
+        warmup_learning_rate = init_lr * warmup_percent_done
+
+        is_warmup = tf.cast(global_steps_int < warmup_steps_int, tf.float32)
+        learning_rate = ((1.0 - is_warmup) * learning_rate + is_warmup * warmup_learning_rate)
+    return learning_rate
 
 
 def _transformer_learning_rate(lr_config, global_step):
@@ -194,39 +240,31 @@ def get_optimizer(network_config, default_optimizer=tf.train.AdadeltaOptimizer(l
     if isinstance(optimizer.lr, numbers.Number):
         lr = optimizer.lr
     else:
+        optimizer.lr.num_train_steps = network_config.max_steps
         lr = get_learning_rate(optimizer.lr, tf.train.get_global_step())
 
     name = optimizer.name
+    params = optimizer.params
     if "Adadelta" == name:
-        opt = tf.train.AdadeltaOptimizer(lr, **optimizer.params)
+        opt = tf.train.AdadeltaOptimizer(lr, **params)
     elif "Adam" == name:
-        opt = tf.train.AdamOptimizer(lr, **optimizer.params)
+        opt = tf.train.AdamOptimizer(lr, **params)
     elif "LazyAdam" == name:
-        opt = LazyAdamOptimizer(lr, **optimizer.params)
+        opt = LazyAdamOptimizer(lr, **params)
     elif "LazyNadam" == name:
-        opt = LazyNadamOptimizer(lr, **optimizer.params)
+        opt = LazyNadamOptimizer(lr, **params)
     elif "SGD" == name:
         opt = tf.train.GradientDescentOptimizer(lr)
     elif "Momentum" == name:
-        opt = tf.train.MomentumOptimizer(lr, **optimizer.params)
+        opt = tf.train.MomentumOptimizer(lr, **params)
     elif "Nadam" == name:
-        opt = NadamOptimizerSparse(lr, **optimizer.params)
+        opt = NadamOptimizerSparse(lr, **params)
+    elif "bert" == name:
+        opt = AdamWeightDecayOptimizer(lr, weight_decay_rate=0.01, beta_1=0.9, beta_2=0.999, epsilon=1e-6,
+                                       exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"])
     else:
         raise ValueError("Invalid optimizer name: {}".format(name))
     return opt
-
-
-def get_gradient_clip(network_config, default_val=5.0):
-    """
-    Given a configuration, return the clip norm, or a given default value.
-    :param network_config: network configuration
-    :param default_val: default clip norm
-    :return: clip norm
-    """
-    if not network_config.optimizer or not network_config.optimizer.get('clip'):
-        tf.logging.info("Using default global norm of gradient clipping threshold of %f", default_val)
-        return default_val
-    return network_config.optimizer.get('clip')
 
 
 def get_l2_loss(network_config, variables):
@@ -251,7 +289,7 @@ def get_l2_loss(network_config, variables):
 
 def train_op_from_config(config, loss):
     optimizer = get_optimizer(config)
-    clip_norm = get_gradient_clip(config)
+    clip_norm = config.optimizer.clip
 
     parameters = tf.trainable_variables()
 
@@ -263,7 +301,14 @@ def train_op_from_config(config, loss):
     gradients = tf.gradients(loss, parameters)
     gradients = tf.clip_by_global_norm(gradients, clip_norm=clip_norm)[0]
 
-    return optimizer.apply_gradients(grads_and_vars=zip(gradients, parameters), global_step=tf.train.get_global_step())
+    global_step = tf.train.get_global_step()
+    result = optimizer.apply_gradients(grads_and_vars=zip(gradients, parameters), global_step=global_step)
+    if isinstance(optimizer, AdamWeightDecayOptimizer):
+        # AdamWeightDecayOptimizer does not update the global step, unlike other optimizers
+        new_global_step = global_step + 1
+        train_op = tf.group(result, [global_step.assign(new_global_step)])
+        return train_op
+    return result
 
 
 def append_label(metric_key, target_key, default_val=None):

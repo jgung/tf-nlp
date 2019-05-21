@@ -4,8 +4,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.crf.python.ops import crf
 from tensorflow.python.ops.lookup_ops import index_to_string_table_from_file
-
 from tfnlp.common import constants
+from tfnlp.common.bert import BERT_SUBLABEL
 from tfnlp.common.config import append_label
 from tfnlp.common.eval_hooks import ClassifierEvalHook, SequenceEvalHook, SrlEvalHook, SrlFtEvalHook
 from tfnlp.common.metrics import tagger_metrics
@@ -175,7 +175,11 @@ def create_transition_matrix(labels):
     transition_params = np.zeros([num_tags, num_tags], dtype=np.float32)
     for i, prev_label in enumerate(labels):
         for j, curr_label in enumerate(labels):
-            if i != j and curr_label[:2] == 'I-' and not prev_label == 'B' + curr_label[1:]:
+            if curr_label == BERT_SUBLABEL:
+                transition_params[i, j] = np.NINF
+            elif i == j:
+                continue
+            elif curr_label[:2] == 'I-' and prev_label != 'B-' + curr_label[2:]:
                 transition_params[i, j] = np.NINF
     return tf.initializers.constant(transition_params)
 
@@ -184,7 +188,11 @@ class TaggerHead(ModelHead):
 
     def __init__(self, inputs, config, features, params, training=False):
         super().__init__(inputs, config, features, params, training)
-        self._sequence_lengths = self.features[constants.LENGTH_KEY]
+        if constants.BERT_SPLIT_INDEX in self.features:
+            self._sequence_lengths = self.features[constants.BERT_SPLIT_INDEX]
+        else:
+            self._sequence_lengths = self.features[constants.LENGTH_KEY]
+
         self._tag_transitions = None
 
     def _all(self):
@@ -217,12 +225,15 @@ class TaggerHead(ModelHead):
                                   num_labels=num_labels,
                                   crf=self.config.crf, tag_transitions=self._tag_transitions,
                                   label_smoothing=self.config.label_smoothing,
-                                  confidence_penalty=self.config.confidence_penalty)
+                                  confidence_penalty=self.config.confidence_penalty,
+                                  mask=self.features.get(constants.SEQUENCE_MASK))
 
         self.metric = tf.Variable(0, name=append_label(constants.OVERALL_KEY, self.name), dtype=tf.float32, trainable=False)
 
     def _eval_predict(self):
-        self.predictions = crf.crf_decode(self.logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]
+        predictions = crf.crf_decode(self.logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]
+        # optionally mask intermediate subtokens from prediction results
+        self.predictions = self._mask_subtokens(predictions)
 
     def _evaluation(self):
         self.evaluation_hooks = []
@@ -233,7 +244,7 @@ class TaggerHead(ModelHead):
         eval_tensors = {  # tensors necessary for evaluation hooks (such as sequence length)
             constants.LENGTH_KEY: self._sequence_lengths,
             constants.SENTENCE_INDEX: self.features[constants.SENTENCE_INDEX],
-            labels_key: self.targets,
+            labels_key: self._mask_subtokens(self.targets),
             predictions_key: self.predictions,
         }
 
@@ -273,6 +284,17 @@ class TaggerHead(ModelHead):
             self.metric_ops[acc_key] = tf.metrics.accuracy(labels=self.targets, predictions=self.predictions, name=acc_key)
 
             self.evaluation_hooks.append(SequenceEvalHook(**eval_params))
+
+    def _mask_subtokens(self, tensor_with_subtokens):
+        mask = self.features.get(constants.SEQUENCE_MASK)
+        if mask is not None:
+            cond = tf.greater(mask, tf.zeros(tf.shape(mask), tf.int64))
+            ignore = self.extractor.feat2index(BERT_SUBLABEL)
+            tensor_with_subtokens = tf.where(cond,
+                                             tf.cast(tensor_with_subtokens, tf.int64),
+                                             tf.cast(tf.fill(tf.shape(tensor_with_subtokens), ignore), tf.int64))
+            return tensor_with_subtokens
+        return tensor_with_subtokens
 
 
 class BiaffineSrlHead(TaggerHead):
@@ -327,7 +349,8 @@ class BiaffineSrlHead(TaggerHead):
                                  crf=self.config.crf,
                                  tag_transitions=self._tag_transitions,
                                  label_smoothing=self.config.label_smoothing,
-                                 confidence_penalty=self.config.confidence_penalty, name="bilinear_loss")
+                                 confidence_penalty=self.config.confidence_penalty, name="bilinear_loss",
+                                 mask=self.features.get(constants.SEQUENCE_MASK))
 
         self.loss = rel_loss
         self.metric = tf.Variable(0, name=append_label(constants.OVERALL_KEY, self.name), dtype=tf.float32, trainable=False)
