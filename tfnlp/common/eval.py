@@ -183,8 +183,18 @@ def accuracy_eval(gold_labels, predicted_labels, indices, output_file=None):
     return accuracy
 
 
-def parser_write_and_eval(arc_probs, rel_probs, heads, rels, script_path, features, out_path, gold_path):
-    sys_heads, sys_rels = get_parse_predictions(arc_probs, rel_probs, features)
+def parser_write_and_eval(arc_probs, rel_probs, heads, rels, script_path, features, out_path, gold_path, mask=None):
+    sys_heads, sys_rels = get_parse_predictions(arc_probs, rel_probs, features, mask)
+
+    if mask is not None:
+        new_heads = []
+        new_rels = []
+        for nh, nr, ms in zip(heads, rels, mask):
+            ms[0] = 1
+            new_heads.append(nh[ms[:len(nh)] != 0])
+            new_rels.append([rel for i, rel in enumerate(nr) if ms[i] != 0])
+        heads = new_heads
+        rels = new_rels
 
     line_func = _conllx_line if 'conllx' in script_path else _conll09_line
 
@@ -195,17 +205,24 @@ def parser_write_and_eval(arc_probs, rel_probs, heads, rels, script_path, featur
     return subprocess.check_output(['perl', script_path, '-g', gold_path, '-s', out_path, '-q'], universal_newlines=True)
 
 
-def get_parse_predictions(arc_probs, rel_probs, rel_feat):
+def get_parse_predictions(arc_probs, rel_probs, rel_feat, masks=None):
     heads = []
     rels = []
-    for arc_prob_matrix, rel_prob_tensor in zip(arc_probs, rel_probs):
-        arc_preds, rel_preds = get_parse_prediction(arc_prob_matrix, rel_prob_tensor, rel_feat)
+    if not masks:
+        masks = [None] * len(arc_probs)
+    for arc_prob_matrix, rel_prob_tensor, mask in zip(arc_probs, rel_probs, masks):
+        arc_preds, rel_preds = get_parse_prediction(arc_prob_matrix, rel_prob_tensor, rel_feat, mask)
         rels.append(rel_preds)
         heads.append(arc_preds)
     return heads, rels
 
 
-def get_parse_prediction(arc_prob_matrix, rel_prob_tensor, rel_feat=None):
+def get_parse_prediction(arc_prob_matrix, rel_prob_tensor, rel_feat=None, mask=None):
+    if mask is not None:
+        mask[0] = 1
+        rel_prob_tensor = rel_prob_tensor[mask != 0, :, :][:, :, mask != 0]
+        arc_prob_matrix = arc_prob_matrix[mask[:len(arc_prob_matrix)] != 0, :][:, mask[:len(arc_prob_matrix)] != 0]
+
     arc_preds = nonprojective(arc_prob_matrix)
     arc_preds_one_hot = np.zeros([rel_prob_tensor.shape[0], rel_prob_tensor.shape[2]])
     arc_preds_one_hot[np.arange(len(arc_preds)), arc_preds] = 1.

@@ -24,11 +24,19 @@ class ParserHead(ModelHead):
         self.rel_probs = None
         self.n_tokens = None
         self.predictions = None
+        self._sequence_lengths = self.features[constants.LENGTH_KEY]
 
     def _all(self):
         inputs = get_encoder_input(self.inputs)
         input_shape = get_shape(inputs)  # (b x n x d), d == output_size
         self.n_steps = input_shape[1]  # n
+
+        lens = self._sequence_lengths
+        if constants.SEQUENCE_MASK in self.features:
+            self.mask = tf.cast(self.features[constants.SEQUENCE_MASK], tf.bool)
+        else:
+            lens = tf.sequence_mask(lens, name="padding_mask")
+            self.mask = tf.concat([tf.fill([tf.shape(lens)[0], 1], True), lens], axis=1)
 
         # apply 2 arc and 2 rel MLPs to each output vector (1 for representing dependents, 1 for heads)
         def _mlp(size, name):
@@ -41,6 +49,7 @@ class ParserHead(ModelHead):
         # apply binary biaffine classifier for arcs
         with tf.variable_scope("arc_bilinear_logits"):
             self.arc_logits = bilinear(dep_arc_mlp, head_arc_mlp, 1, self.n_steps, include_bias2=False)  # (b x n x n)
+            self.arc_logits = tf.reshape(tf.cast(self.mask, tf.float32), [-1, 1, self.n_steps]) * self.arc_logits
             self.arc_predictions = tf.argmax(self.arc_logits, axis=-1)  # (b x n)
 
         # apply variable class biaffine classifier for rels
@@ -50,9 +59,6 @@ class ParserHead(ModelHead):
 
     def _train_eval(self):
         # compute combined arc and rel losses (both via softmax cross entropy)
-        lens = self.features[constants.LENGTH_KEY]
-        _mask = tf.sequence_mask(lens, name="padding_mask")
-        self.mask = tf.concat([tf.fill([tf.shape(lens)[0], 1], True), _mask], axis=1)
 
         def compute_loss(logits, targets, name):
             with tf.variable_scope(name):
@@ -73,7 +79,7 @@ class ParserHead(ModelHead):
         # compute relations, and arc/prob probabilities for use in MST algorithm
         self.arc_probs = tf.nn.softmax(self.arc_logits)  # (b x n)
         self.rel_probs = tf.nn.softmax(self.rel_logits, axis=2)  # (b x n x r x n)
-        self.n_tokens = tf.cast(tf.reduce_sum(self.features[constants.LENGTH_KEY]), tf.int32)
+        self.n_tokens = tf.cast(tf.reduce_sum(self._sequence_lengths), tf.int32)
         _rel_logits = select_logits(self.rel_logits, self.arc_predictions, self.n_steps)  # (b x n x r)
         self.predictions = tf.argmax(_rel_logits, axis=-1)  # (b x n)
 
@@ -107,7 +113,8 @@ class ParserHead(ModelHead):
                     constants.REL_PROBS: self.rel_probs,
                     constants.LENGTH_KEY: self.features[constants.LENGTH_KEY],
                     constants.HEAD_KEY: self.features[constants.HEAD_KEY],
-                    constants.DEPREL_KEY: self.features[constants.DEPREL_KEY]
+                    constants.DEPREL_KEY: self.features[constants.DEPREL_KEY],
+                    constants.SEQUENCE_MASK: self.features.get(constants.SEQUENCE_MASK)
                 }, features=self.extractor, script_path=self.params.script_path,
                 eval_update=tf.assign(self.metric, eval_placeholder),
                 eval_placeholder=eval_placeholder,

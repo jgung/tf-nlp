@@ -1,0 +1,64 @@
+{
+  "reader": "conllx",
+  "ema_decay": 0.999,
+  "checkpoint_epochs": 0.5,
+  "max_epochs": 8,
+  "batch_size": 16,
+  "max_length": 64,
+  "optimizer": {
+    "name": "bert",
+    "lr": {
+      "name": "bert",
+      "rate": 0.00005,
+      "warmup_proportion": 0.1
+    },
+    "clip": 1.0
+  },
+  "features": {
+    "targets": [
+      {
+        "name": "head",
+        "key": "head",
+        "numeric": true
+      },
+      {
+        "name": "deprel",
+        "key": "deprel",
+        "indices": {
+          "O": 0,
+          "X": 1
+        },
+        "unknown_word": "dep",
+        "pad_word": "O"
+      }
+    ],
+    "inputs": [
+      {
+        "name": "bert",
+        "label_subtokens": false
+      }
+    ]
+  },
+  "encoders": [
+    {
+      "name": "dep-blstm",
+      "inputs": [
+        "bert"
+      ],
+      "encoder": "lstm",
+      "state_size": 400,
+      "encoder_dropout": 0.33,
+      "encoder_input_dropout": 0.33,
+      "forget_bias": 1,
+      "encoder_layers": 3
+    }
+  ],
+  "heads": [
+    {
+      "encoder": "dep-blstm",
+      "name": "deprel",
+      "type": "parser",
+      "mlp_dropout": 0.33
+    }
+  ]
+}

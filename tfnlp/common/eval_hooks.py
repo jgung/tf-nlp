@@ -3,7 +3,7 @@ import os
 import tensorflow as tf
 from tensorflow.python.training import session_run_hook
 from tensorflow.python.training.session_run_hook import SessionRunArgs
-from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS, LABEL_SCORES
+from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS, LABEL_SCORES, SEQUENCE_MASK
 from tfnlp.common.constants import LABEL_KEY, LENGTH_KEY, MARKER_KEY, SENTENCE_INDEX
 from tfnlp.common.eval import PREDICTIONS_FILE, append_srl_prediction_output, GOLD_FILE
 from tfnlp.common.eval import accuracy_eval, conll_eval, conll_srl_eval, write_props_to_file, parser_write_and_eval
@@ -156,6 +156,7 @@ class ParserEvalHook(session_run_hook.SessionRunHook):
         self._arcs = None
         self._rel_probs = None
         self._rels = None
+        self._mask = None
         self._eval_update = eval_update
         self._eval_placeholder = eval_placeholder
 
@@ -164,6 +165,7 @@ class ParserEvalHook(session_run_hook.SessionRunHook):
         self._rel_probs = []
         self._rels = []
         self._arcs = []
+        self._mask = []
 
     def before_run(self, run_context):
         return SessionRunArgs(fetches=self._tensors)
@@ -177,6 +179,8 @@ class ParserEvalHook(session_run_hook.SessionRunHook):
             self._arc_probs.append(arc_probs[:seq_len, :seq_len])
             self._rels.append(binary_np_array_to_unicode(rels[:seq_len]))
             self._arcs.append(heads[:seq_len])
+        if SEQUENCE_MASK in run_values.results:
+            self._mask.extend(run_values.results[SEQUENCE_MASK])
 
     def end(self, session):
         output_file = os.path.join(self._output_dir, 'dep.' + PREDICTIONS_FILE)
@@ -188,7 +192,8 @@ class ParserEvalHook(session_run_hook.SessionRunHook):
                                        script_path=self._script_path,
                                        features=self._features,
                                        out_path=output_file,
-                                       gold_path=gold_file)
+                                       gold_path=gold_file,
+                                       mask=self._mask)
         tf.logging.info('\n%s', result)
 
         lines = result.split('\n')

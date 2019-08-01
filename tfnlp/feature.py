@@ -175,6 +175,8 @@ class FeatureConfig(Params):
         config = feature.get('config', Params())
         self.config = FeatureHyperparameters(config, self)
         self.constraint_key = feature.get('constraint_key')
+        # bert option, indicates whether or not to extend subtokens with IOB labels
+        self.label_subtokens = feature.get('label_subtokens', True)
 
 
 class FeaturesConfig(object):
@@ -226,11 +228,12 @@ def get_feature_extractor(config):
     # load default configurations
     config = FeaturesConfig(config)
 
-    if constants.BERT_KEY in [inp.name for inp in config.inputs]:
+    bert_feat = next(iter([inp for inp in config.inputs if inp.name == constants.BERT_KEY]), None)
+    if bert_feat:
         tf.logging.info("BERT feature found in inputs, using BERT feature extractor")
         feats = [feat for feat in config.inputs if feat.name != constants.BERT_KEY]
         contains_marker = len([feat for feat in config.inputs if feat.name == constants.MARKER_KEY]) > 0
-        return BertFeatureExtractor(targets=config.targets, features=feats, srl=contains_marker)
+        return BertFeatureExtractor(targets=config.targets, features=feats, srl=contains_marker, bert_feat=bert_feat)
 
     # use this feature to keep track of instance indices for error analysis
     config.inputs.append(index_feature())
@@ -250,6 +253,7 @@ class DummyExtractor(object):
     def __init__(self, name, rank=-1, **kwargs) -> None:
         self.name = name
         self.rank = rank
+        self.options = {**kwargs}
 
     def has_vocab(self):
         return False
@@ -941,10 +945,10 @@ class BertLengthFeature(Extractor):
 
 
 class BertFeatureExtractor(BaseFeatureExtractor):
-    def __init__(self, targets, features=None, srl=False, model=BERT_S_CASED_URL) -> None:
+    def __init__(self, targets, bert_feat, features=None, srl=False, model=BERT_S_CASED_URL) -> None:
         super().__init__()
         self.srl = srl
-        self.label_subtokens = True
+        self.label_subtokens = bert_feat.options.get('label_subtokens', True)
         bert_module = hub.Module(model)
         tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
         with tf.Session() as sess:
@@ -982,9 +986,9 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         split_labels = {}
         if train:
             target_seqs = {target.name: target.get_values(instance) for target in self.targets.values() if target.rank == 2}
-            split_labels = {target: [BERT_SUBLABEL] for target in target_seqs.keys()}
+            split_labels = {target: [0] if self.target(target).dtype == tf.int64 else [BERT_SUBLABEL]
+                            for target in target_seqs.keys()}
         split_tokens = [BERT_CLS]
-
         mask = [0]
 
         # SRL-specific
@@ -1015,15 +1019,16 @@ class BertFeatureExtractor(BaseFeatureExtractor):
                         label = 'I-' + label[2:]
                     # else label = label
                 else:
-                    label = BERT_SUBLABEL
+                    label = 0 if self.target(target).dtype == tf.int64 else BERT_SUBLABEL
                 split_labels[target].extend((len(sub_tokens) - 1) * [label])
 
         split_tokens.append(BERT_SEP)
         mask.append(0)
 
         if train:
-            for labels in split_labels.values():
-                labels.append(BERT_SUBLABEL)
+            for target, labels in split_labels.items():
+                label = 0 if self.target(target).dtype == tf.int64 else BERT_SUBLABEL
+                labels.append(label)
 
         if self.srl:
             segment_index = len(split_tokens)
@@ -1045,7 +1050,11 @@ class BertFeatureExtractor(BaseFeatureExtractor):
 
         for name, labels in split_labels.items():
             assert len(labels) == len(ids)
-            feature_list[name] = str_feature_list(labels)  # labels
+            # labels
+            if self.target(name).dtype == tf.int64:
+                feature_list[name] = int64_feature_list(labels)
+            else:
+                feature_list[name] = str_feature_list(labels)
 
         feature_list[constants.BERT_KEY] = int64_feature_list(ids)  # BERT wordpiece token indices
         feature_list[constants.SEQUENCE_MASK] = int64_feature_list(mask)
