@@ -2,7 +2,7 @@ import tensorflow as tf
 from common.config import append_label
 from tensorflow.python.training import session_run_hook
 from tensorflow.python.training.session_run_hook import SessionRunArgs
-from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS, LABEL_SCORES
+from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS, LABEL_SCORES, ACTIVE_TASK_KEY
 from tfnlp.common.constants import LABEL_KEY, LENGTH_KEY, MARKER_KEY, SENTENCE_INDEX
 from tfnlp.common.eval import append_srl_prediction_output
 from tfnlp.common.utils import binary_np_array_to_unicode
@@ -54,27 +54,35 @@ class EvalHook(session_run_hook.SessionRunHook):
 
 
 class ClassifierEvalHook(EvalHook):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, index=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._score_name = append_label(LABEL_SCORES, self._target.name)
+        self.index = index
 
     def _create_instances(self, run_context, run_values):
         instances, results = super()._create_instances(run_context, run_values)
 
         constraint_keys = run_values.results[self._target.constraint_key] if self._target.constraints else [None] * len(instances)
-        for instance, result, gold, prediction, scores, constraint_key in zip(instances,
-                                                                              results,
-                                                                              run_values.results[self._label_key],
-                                                                              run_values.results[self._predict_key],
-                                                                              run_values.results[LABEL_SCORES],
-                                                                              constraint_keys):
+
+        filtered_instances = []
+        filtered_results = []
+        for instance, result, gold, prediction, scores, active_task, constraint_key in zip(instances,
+                                                                                           results,
+                                                                                           run_values.results[self._label_key],
+                                                                                           run_values.results[self._predict_key],
+                                                                                           run_values.results[LABEL_SCORES],
+                                                                                           run_values.results[ACTIVE_TASK_KEY],
+                                                                                           constraint_keys):
             instance[self._target.key] = self._target.index_to_feat(gold)
             result[self._target.name] = self._target.index_to_feat(prediction)
             result[self._score_name] = scores
             if self._target.constraints:
                 instance[self._target.constraint_key] = constraint_key.decode('utf-8')
+            if active_task[self.index] > 0:
+                filtered_instances.append(instance)
+                filtered_results.append(result)
 
-        return instances, results
+        return filtered_instances, filtered_results
 
 
 class SequenceEvalHook(EvalHook):

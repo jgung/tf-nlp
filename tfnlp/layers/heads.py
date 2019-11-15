@@ -158,6 +158,7 @@ class ClassifierHead(ModelHead):
             constants.LABEL_SCORES: self.scores,
             constants.LENGTH_KEY: self._sequence_lengths,
             constants.SENTENCE_INDEX: self.features[constants.SENTENCE_INDEX],
+            constants.ACTIVE_TASK_KEY: self.features[constants.ACTIVE_TASK_KEY]
         }
 
         constraint_key = self.extractor.constraint_key
@@ -166,6 +167,7 @@ class ClassifierHead(ModelHead):
 
         self.evaluation_hooks = [
             ClassifierEvalHook(
+                index=self.index,
                 label_key=labels_key,
                 predict_key=predictions_key,
                 tensors=tensors,
