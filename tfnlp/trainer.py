@@ -206,7 +206,8 @@ class Trainer(object):
     def _train_vocab(self, train_path: str):
         tf.logging.info("Creating new vocabulary using training data at %s", train_path)
         self._feature_extractor.initialize(self._resources)
-        self._feature_extractor.train(self._extract_raw(train_path))
+        for path in split_paths(train_path):
+            self._feature_extractor.train(self._extract_raw(path))
         tf.logging.info("Writing new feature/label vocabulary to %s", self._vocab_path)
         self._feature_extractor.write_vocab(self._vocab_path, resources=self._resources, prune=True)
 
@@ -216,16 +217,22 @@ class Trainer(object):
         return examples
 
     def _extract_and_write(self, path: str, test: bool = False):
-        output_path = self._data_path_fn(path)
-        if tf.gfile.Exists(output_path):
-            tf.logging.info("Using pre-existing features for %s from %s", path, output_path)
-            return
-        examples = self._extract_features(path, test)
-        write_features(examples, output_path)
+        for file in split_paths(path):
+            output_path = self._data_path_fn(file)
+            if tf.gfile.Exists(output_path):
+                tf.logging.info("Using pre-existing features for %s from %s", file, output_path)
+                return
+            examples = self._extract_features(file, test)
+            write_features(examples, output_path)
 
     def _compute_steps(self, train, valid):
-        train_count = sum(1 for _ in tf.python_io.tf_record_iterator(self._data_path_fn(train)))
-        valid_count = sum(1 for _ in tf.python_io.tf_record_iterator(self._data_path_fn(valid)))
+        def _count_records(paths):
+            count = 0
+            for path in split_paths(paths):
+                count += sum(1 for _ in tf.python_io.tf_record_iterator(self._data_path_fn(path)))
+            return count
+        train_count = _count_records(train)
+        valid_count = _count_records(valid)
 
         steps_per_epoch = train_count // self._training_config.batch_size
         if not self._training_config.max_epochs:
@@ -327,13 +334,17 @@ class Trainer(object):
                 write_json(self._training_config, os.path.join(self._job_dir, constants.CONFIG_PATH))
 
         return lambda: make_dataset(self._feature_extractor,
-                                    paths=self._data_path_fn(dataset),
+                                    paths=[self._data_path_fn(path) for path in split_paths(dataset)],
                                     batch_size=self._training_config.batch_size,
                                     evaluate=not train,
                                     bucket_sizes=bucket_sizes,
                                     buffer_size=self._training_config.buffer_size,
                                     batch_buffer_size=self._training_config.batch_buffer_size,
                                     caching=self._training_config.dataset_caching)
+
+
+def split_paths(comma_separated_path):
+    return [p for p in comma_separated_path.split(',') if p.strip()]
 
 
 TRAINING_MODES = {'train', 'predict', 'test', 'itl', 'features-only'}
@@ -387,7 +398,7 @@ def cli():
                       debug=opts.debug)
 
     mode = opts.mode
-    test_paths = [t for t in opts.test.split(',') if t.strip()] if opts.test else None
+    test_paths = split_paths(opts.test) if opts.test else None
 
     if mode not in TRAINING_MODES:
         raise ValueError("Unexpected mode type: {}".format(mode))

@@ -13,7 +13,8 @@ from tfnlp.common.bert import BERT_S_CASED_URL, BERT_CLS, BERT_SEP, BERT_SUBLABE
 from tfnlp.common.constants import ELMO_KEY, END_WORD, INITIALIZER, LENGTH_KEY, PAD_WORD, SENTENCE_INDEX, START_WORD, \
     UNKNOWN_WORD
 from tfnlp.common.embedding import initialize_embedding_from_dict, read_vectors
-from tfnlp.common.feature_utils import int64_feature_list, int64_feature, str_feature_list, sequence_example, str_feature
+from tfnlp.common.feature_utils import int64_feature_list, int64_feature, str_feature_list, sequence_example, str_feature, \
+    int64_features
 from tfnlp.common.utils import Params, deserialize, serialize, write_json, read_json
 from tfnlp.layers.reduce import ConvNet, Mean
 
@@ -147,6 +148,8 @@ class FeatureConfig(Params):
         self.key = feature.get('key')
         # count threshold for features
         self.threshold = feature.get('threshold', 0)
+        # default value of feature if none is provided
+        self.default_val = feature.get('default_val')
         # number of tokens to use for left padding
         self.left_padding = feature.get('left_padding', 0)
         # word used for left padding
@@ -245,6 +248,8 @@ def get_feature_extractor(config):
                         "sequence length from this key. " % config.seq_feat)
         seq_feat = SequenceFeature(LENGTH_KEY, config.seq_feat)
     config.inputs.append(LengthFeature(seq_feat))
+    # add a feature that indicates the presence of labels for each task (sorted by order of targets in feature extractor)
+    config.inputs.append(TaskIndicator([target.key for target in config.targets]))
 
     return FeatureExtractor(features=config.inputs, targets=config.targets)
 
@@ -288,6 +293,7 @@ class Extractor(DummyExtractor):
         self.padding_funcs = padding_funcs if padding_funcs else []
         self.default_val = default_val
         self.dtype = tf.int64
+        self.dim = None
 
     def _extract_raw(self, instance):
         value = self.get_values(instance)
@@ -636,6 +642,16 @@ class LengthFeature(Extractor):
         return self.seq_feat.get_values(sequence)
 
 
+class TaskIndicator(Extractor):
+    def __init__(self, tasks: list, name=constants.ACTIVE_TASK_KEY):
+        super().__init__(name=name, key=name)
+        self.tasks = tasks
+        self.dim = len(tasks)
+
+    def extract(self, instance):
+        return int64_features([1 if task in instance else 0 for task in self.tasks])
+
+
 def index_feature():
     return Extractor(name=SENTENCE_INDEX, key=SENTENCE_INDEX, default_val=0)
 
@@ -722,6 +738,8 @@ def get_feature_spec(extractors):
     for feature in extractors:
         if type(feature) == DummyExtractor:
             continue  # dummy feature
+        elif feature.name == constants.ACTIVE_TASK_KEY:
+            context_features[feature.name] = tf.FixedLenFeature([feature.dim], dtype=feature.dtype)
         elif feature.rank == 1:
             context_features[feature.name] = tf.FixedLenFeature([], dtype=feature.dtype)
         elif feature.rank == 2:
@@ -739,6 +757,8 @@ def get_shapes(extractors):
     for feature in extractors:
         if type(feature) == DummyExtractor:
             continue  # dummy feature
+        elif feature.name == constants.ACTIVE_TASK_KEY:
+            shapes[feature.name] = tf.TensorShape([feature.dim])
         elif feature.rank == 3:
             shapes[feature.name] = tf.TensorShape([None, feature.max_len])
         elif feature.rank == 2:
@@ -855,6 +875,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         super().__init__()
         self.features = {feature.name: feature for feature in features}
         self.targets = {target.name: target for target in targets} if targets else {}
+        self.ordered_targets = [target.name for target in targets]
 
     def extractors(self, train=True):
         if train:

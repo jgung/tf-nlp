@@ -2,9 +2,10 @@ import os
 
 import numpy as np
 import tensorflow as tf
-from tfnlp.cli.evaluators import TaggerEvaluator, SrlEvaluator, TokenClassifierEvaluator
 from tensorflow.contrib.crf.python.ops import crf
 from tensorflow.python.ops.lookup_ops import index_to_string_table_from_file
+
+from tfnlp.cli.evaluators import TaggerEvaluator, SrlEvaluator, TokenClassifierEvaluator
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_SUBLABEL
 from tfnlp.common.config import append_label
@@ -19,6 +20,7 @@ class ModelHead(object):
         self.config = config
         self.name = config.name
         self.extractor = params.extractor.targets[self.name]
+        self.index = params.extractor.ordered_targets.index(self.name)
         self.features = features
         self.params = params
         self._training = training
@@ -117,13 +119,18 @@ class ClassifierHead(ModelHead):
             self.logits = tf.layers.dense(inputs, num_labels, kernel_initializer=tf.zeros_initializer)
 
     def _train_eval(self):
+        self.loss = tf.cond(tf.reduce_sum(self.features[constants.ACTIVE_TASK_KEY], axis=0)[self.index] > 0,
+                            self._loss,
+                            lambda: tf.constant(0, dtype=tf.float32))
+
+    def _loss(self):
         if self.config.label_smoothing > 0:
             targets = tf.one_hot(self.targets, depth=self.extractor.vocab_size())
-            self.loss = tf.losses.softmax_cross_entropy(onehot_labels=targets,
-                                                        logits=self.logits,
-                                                        label_smoothing=self.config.label_smoothing)
+            return tf.losses.softmax_cross_entropy(onehot_labels=targets,
+                                                   logits=self.logits,
+                                                   label_smoothing=self.config.label_smoothing)
         else:
-            self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.targets))
+            return tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.targets))
 
     def _eval_predict(self):
         self.scores = tf.nn.softmax(self.logits)  # (b x n)

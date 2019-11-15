@@ -4,6 +4,7 @@ import tensorflow as tf
 from tensorflow.python.data.experimental import shuffle_and_repeat, bucket_by_sequence_length
 from tensorflow.python.data.experimental.ops.optimization import AUTOTUNE
 from tensorflow.python.data.ops.dataset_ops import DatasetV1Adapter
+from tensorflow.python.data.experimental import choose_from_datasets
 
 from tfnlp.common.constants import LENGTH_KEY
 
@@ -29,36 +30,45 @@ def make_dataset(extractor,
                  caching=True):
     if bucket_sizes is None:
         bucket_sizes = [5, 10, 25, 50, 100]
-    if not isinstance(paths, Iterable):
+    if not isinstance(paths, Iterable) or isinstance(paths, str):
         paths = [paths]
 
-    dataset = tf.data.TFRecordDataset(paths, num_parallel_reads=num_parallel_reads)
+    datasets = []
+    for path in paths:
+        dataset = tf.data.TFRecordDataset([path], num_parallel_reads=num_parallel_reads)
 
-    if caching:
-        dataset = dataset.cache()
+        if caching:
+            dataset = dataset.cache()
 
-    if not evaluate:
-        # shuffle TF records
-        dataset = shuffle_and_repeat(buffer_size=buffer_size, count=max_epochs)(dataset)
+        if not evaluate:
+            # shuffle TF records
+            dataset = shuffle_and_repeat(buffer_size=buffer_size, count=max_epochs)(dataset)
 
-    # parse serialized TF records into dictionaries of Tensors for each feature
-    dataset = dataset.map(extractor.parse, num_parallel_calls=num_parallel_calls)
+        # parse serialized TF records into dictionaries of Tensors for each feature
+        dataset = dataset.map(extractor.parse, num_parallel_calls=num_parallel_calls)
 
-    # bucket dataset by sequence length, applying random noise to sequences so we don't repeat the same buckets across epochs
-    dataset = dataset.apply(bucket_by_sequence_length(element_length_func=lambda elem: _add_uniform_noise(elem[LENGTH_KEY],
-                                                                                                          length_noise_stdev),
-                                                      bucket_boundaries=bucket_sizes,
-                                                      bucket_batch_sizes=(len(bucket_sizes) + 1) * [batch_size],
-                                                      padded_shapes=extractor.get_shapes(),
-                                                      padding_values=extractor.get_padding()))
-    if not evaluate:
-        # now sort bucketed batches -- maybe not efficient, but let's ensure our training set order is really random
-        dataset = dataset.shuffle(batch_buffer_size)
+        # bucket dataset by sequence length, applying random noise to sequences so we don't repeat the same buckets across epochs
+        dataset = dataset.apply(bucket_by_sequence_length(element_length_func=lambda elem: _add_uniform_noise(elem[LENGTH_KEY],
+                                                                                                              length_noise_stdev),
+                                                          bucket_boundaries=bucket_sizes,
+                                                          bucket_batch_sizes=(len(bucket_sizes) + 1) * [batch_size],
+                                                          padded_shapes=extractor.get_shapes(),
+                                                          padding_values=extractor.get_padding()))
+        if not evaluate:
+            # now sort bucketed batches -- maybe not efficient, but let's ensure our training set order is really random
+            dataset = dataset.shuffle(batch_buffer_size)
 
-    # seems to be generally set to 1 or 2
-    dataset = dataset.prefetch(AUTOTUNE)
+        # seems to be generally set to 1 or 2
+        dataset = dataset.prefetch(AUTOTUNE)
+        datasets.append(dataset)
 
-    return DatasetV1Adapter(dataset)
+    # if len(datasets) == 1:
+    #     return DatasetV1Adapter(datasets[0])
+
+    choice_dataset = tf.data.Dataset.range(len(datasets)).repeat()
+    result = choose_from_datasets(datasets, choice_dataset)
+
+    return DatasetV1Adapter(result)
 
 
 def padded_batch(extractor, placeholder, batch_size=64):

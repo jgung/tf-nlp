@@ -8,6 +8,7 @@ UNKNOWN_INDEX = 1
 START_INDEX = 2
 END_INDEX = 3
 
+ACTIVE_TASK_KEY = "active_task"
 LABEL_KEY = "gold"
 LABEL_SCORES = "scores"
 PREDICT_KEY = "pred"

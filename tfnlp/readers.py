@@ -40,6 +40,21 @@ class TsvReader(object):
         return {LABEL_KEY: fields[0], WORD_KEY: word_tokenize(fields[1])}
 
 
+class FileKeyTsvReader(TsvReader):
+    """
+    TSV reader that assigns unique target keys based on the file name, e.g. task1.train.tsv -> task1.
+    """
+
+    def read_file(self, path):
+        name = os.path.basename(path)
+        key = re.sub('\\..*$', '', name)  # e.g. task1.train.tsv -> task1
+        for instance in super().read_file(path):
+            label = instance[LABEL_KEY]
+            del instance[LABEL_KEY]
+            instance[key] = label  # GOLD -> task1
+            yield instance
+
+
 class SemlinkReader(TsvReader):
     """
     Read SemLink instances from a file at a given path.
@@ -555,6 +570,8 @@ def get_reader(reader_config, training_config=None, is_test=False):
             return ptb_pos_reader()
         elif reader_name == 'tsv':
             return TsvReader()
+        elif reader_name == 'tsv_file_key':
+            return FileKeyTsvReader()
         elif reader_name == 'semlink':
             return SemlinkReader()
 
