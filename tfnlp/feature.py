@@ -981,11 +981,13 @@ class BertFeatureExtractor(BaseFeatureExtractor):
 
         self.tokenizer = FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
         self.targets = {target.name: target for target in targets}
+        self.ordered_targets = [target.name for target in targets]
 
         len_name = constants.BERT_LENGTH_KEY if self.drop_subtokens else constants.LENGTH_KEY
         self.features = {
             len_name: BertLengthFeature(self.tokenizer, srl=srl, name=len_name),
             SENTENCE_INDEX: index_feature(),
+            constants.ACTIVE_TASK_KEY: TaskIndicator(self.ordered_targets),
             **{feature.name: feature for feature in features}
         }
         if drop_subtokens:
