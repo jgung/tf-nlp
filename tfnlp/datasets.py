@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow.python.data.experimental import shuffle_and_repeat, bucket_by_sequence_length
 from tensorflow.python.data.experimental.ops.optimization import AUTOTUNE
 from tensorflow.python.data.ops.dataset_ops import DatasetV1Adapter
-from tensorflow.python.data.experimental import choose_from_datasets
+from tensorflow.python.data.experimental import sample_from_datasets, choose_from_datasets
 
 from tfnlp.common.constants import LENGTH_KEY
 
@@ -14,6 +14,16 @@ def _add_uniform_noise(value, amount):
     noise_value = value * tf.constant(amount, dtype=tf.float32)
     noise = tf.random.uniform(shape=[], minval=-noise_value, maxval=noise_value)
     return tf.cast(value + noise, dtype=tf.int32)
+
+
+def _compute_dataset_weights(datasets):
+    total = 0
+    weights = []
+    for path in datasets:
+        count = float(sum(1 for _ in tf.python_io.tf_record_iterator(path)))
+        total += count
+        weights.append(count)
+    return [weight / total for weight in weights]
 
 
 def make_dataset(extractor,
@@ -27,7 +37,8 @@ def make_dataset(extractor,
                  length_noise_stdev: int = 0.1,
                  buffer_size: int = 100000,
                  batch_buffer_size: int = 512,
-                 caching=True):
+                 caching=True,
+                 random_seed=None):
     if bucket_sizes is None:
         bucket_sizes = [5, 10, 25, 50, 100]
     if not isinstance(paths, Iterable) or isinstance(paths, str):
@@ -42,7 +53,7 @@ def make_dataset(extractor,
 
         if not evaluate:
             # shuffle TF records
-            dataset = shuffle_and_repeat(buffer_size=buffer_size, count=max_epochs)(dataset)
+            dataset = shuffle_and_repeat(buffer_size=buffer_size, count=max_epochs, seed=random_seed)(dataset)
 
         # parse serialized TF records into dictionaries of Tensors for each feature
         dataset = dataset.map(extractor.parse, num_parallel_calls=num_parallel_calls)
@@ -56,17 +67,20 @@ def make_dataset(extractor,
                                                           padding_values=extractor.get_padding()))
         if not evaluate:
             # now sort bucketed batches -- maybe not efficient, but let's ensure our training set order is really random
-            dataset = dataset.shuffle(batch_buffer_size)
+            dataset = dataset.shuffle(batch_buffer_size, seed=random_seed)
 
         # seems to be generally set to 1 or 2
         dataset = dataset.prefetch(AUTOTUNE)
         datasets.append(dataset)
 
-    # if len(datasets) == 1:
-    #     return DatasetV1Adapter(datasets[0])
+    if len(datasets) == 1:
+        return DatasetV1Adapter(datasets[0])
 
     choice_dataset = tf.data.Dataset.range(len(datasets)).repeat()
-    result = choose_from_datasets(datasets, choice_dataset)
+    if evaluate:
+        result = choose_from_datasets(datasets, choice_dataset)
+    else:
+        result = sample_from_datasets(datasets, weights=_compute_dataset_weights(paths), seed=random_seed)
 
     return DatasetV1Adapter(result)
 

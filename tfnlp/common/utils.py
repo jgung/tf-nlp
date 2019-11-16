@@ -87,3 +87,7 @@ def deserialize(in_path, in_name=None):
 
 def binary_np_array_to_unicode(np_string_array):
     return [bstr.decode('utf-8') for bstr in np_string_array.tolist()]
+
+
+def split_paths(comma_separated_path):
+    return [p for p in comma_separated_path.split(',') if p.strip()]

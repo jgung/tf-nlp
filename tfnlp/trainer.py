@@ -21,7 +21,7 @@ from tfnlp.common.config import get_network_config
 from tfnlp.common.eval_hooks import metric_compare_fn
 from tfnlp.common.export import BesterExporter
 from tfnlp.common.logging_utils import set_up_logging
-from tfnlp.common.utils import read_json, write_json
+from tfnlp.common.utils import read_json, write_json, split_paths
 from tfnlp.config_builder import read_config
 from tfnlp.datasets import make_dataset, padded_batch
 from tfnlp.feature import get_default_buckets, get_feature_extractor, write_features
@@ -341,10 +341,6 @@ class Trainer(object):
                                     buffer_size=self._training_config.buffer_size,
                                     batch_buffer_size=self._training_config.batch_buffer_size,
                                     caching=self._training_config.dataset_caching)
-
-
-def split_paths(comma_separated_path):
-    return [p for p in comma_separated_path.split(',') if p.strip()]
 
 
 TRAINING_MODES = {'train', 'predict', 'test', 'itl', 'features-only'}

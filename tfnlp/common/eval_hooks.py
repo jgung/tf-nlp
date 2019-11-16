@@ -1,7 +1,8 @@
 import tensorflow as tf
-from common.config import append_label
 from tensorflow.python.training import session_run_hook
 from tensorflow.python.training.session_run_hook import SessionRunArgs
+
+from tfnlp.common.config import append_label
 from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS, LABEL_SCORES, ACTIVE_TASK_KEY
 from tfnlp.common.constants import LABEL_KEY, LENGTH_KEY, MARKER_KEY, SENTENCE_INDEX
 from tfnlp.common.eval import append_srl_prediction_output
@@ -83,6 +84,10 @@ class ClassifierEvalHook(EvalHook):
                 filtered_results.append(result)
 
         return filtered_instances, filtered_results
+
+    def end(self, session):
+        super().end(session)
+        session.run(self._eval_update, feed_dict={self._eval_placeholder: self._evaluator.metric})
 
 
 class SequenceEvalHook(EvalHook):
