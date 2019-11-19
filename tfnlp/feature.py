@@ -5,7 +5,8 @@ from itertools import chain
 
 import tensorflow as tf
 import tensorflow_hub as hub
-from bert.tokenization import FullTokenizer
+from albert import tokenization as albert_tokenization
+from bert import tokenization as bert_tokenization
 from tensorflow.python.framework.errors_impl import NotFoundError
 from tensorflow.python.lib.io import file_io
 from tfnlp.common import constants
@@ -955,13 +956,13 @@ class BertLengthFeature(Extractor):
         vals = super().get_values(sequence)
         tokens = [BERT_CLS]
         for val in vals:
-            tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(val))
+            tokens.extend(self.tokenizer(val))
         tokens.append(BERT_SEP)
 
         if self.srl:
             # condition on predicate, e.g. [[cls], sentence, [sep], predicate, [sep]]
             predicate_token = vals[sequence[constants.PREDICATE_INDEX_KEY]]
-            tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token))
+            tokens.extend(self.tokenizer(predicate_token))
             tokens.append(BERT_SEP)
 
         return tokens
@@ -982,7 +983,14 @@ class BertFeatureExtractor(BaseFeatureExtractor):
             vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"],
                                                   tokenization_info["do_lower_case"]])
 
-        self.tokenizer = FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
+        def albert_tokenizer(_vocab_file, _do_lower_case):
+            return albert_tokenization.FullTokenizer(_vocab_file, _do_lower_case, spm_model_file=_vocab_file)
+
+        tokenizer = albert_tokenizer if 'albert' in model else bert_tokenization.FullTokenizer
+        tokenizer = tokenizer(vocab_file, do_lower_case)
+        self.tokenizer = lambda word: tokenizer.tokenize(word)
+        self.convert_to_ids = lambda split: tokenizer.convert_tokens_to_ids(split)
+
         self.targets = {target.name: target for target in targets}
         self.ordered_targets = [target.name for target in targets]
 
@@ -995,6 +1003,12 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         }
         if drop_subtokens:
             self.features[LENGTH_KEY] = LengthFeature(SequenceFeature(LENGTH_KEY, constants.WORD_KEY))
+
+    def tok(self, word):
+        if 'albert' in self.model:
+            return self.tokenizer(word)
+        else:
+            return self.tokenizer(word)
 
     def extractors(self, train=True):
         if train:
@@ -1038,7 +1052,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
                 if i == predicate_index:
                     focus_index = predicate_index if self.drop_subtokens else len(split_tokens)
 
-            sub_tokens = self.tokenizer.wordpiece_tokenizer.tokenize(word)
+            sub_tokens = self.tok(word)
             split_tokens.extend(sub_tokens)
             mask.append(1)
             mask.extend([0] * (len(sub_tokens) - 1))
@@ -1068,7 +1082,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
             segment_index = len(split_tokens)
             # condition on predicate, e.g. [[cls], sentence, [sep], predicate, [sep]]
             predicate_token = words[instance[constants.PREDICATE_INDEX_KEY]]
-            predicate_subtokens = self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token)
+            predicate_subtokens = self.tok(predicate_token)
             split_tokens.extend(predicate_subtokens)
             split_tokens.append(BERT_SEP)
             mask.extend((1 + len(predicate_subtokens)) * [0])
@@ -1076,7 +1090,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
                 for target, labels in split_labels.items():
                     labels.extend((1 + len(predicate_subtokens)) * [BERT_SUBLABEL])
 
-        ids = self.tokenizer.convert_tokens_to_ids(split_tokens)
+        ids = self.convert_to_ids(split_tokens)
 
         # (2) convert IDs to TF Record proto format -----------------------------------------------------------------------------
         feature_list = {}

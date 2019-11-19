@@ -1,8 +1,7 @@
 from typing import List, Iterable, Union
 
 import tensorflow as tf
-from tensorflow.python.data.experimental import shuffle_and_repeat, bucket_by_sequence_length
-from tensorflow.python.data.experimental.ops.optimization import AUTOTUNE
+from tensorflow.python.data.experimental import shuffle_and_repeat, bucket_by_sequence_length, AUTOTUNE
 from tensorflow.python.data.ops.dataset_ops import DatasetV1Adapter
 from tensorflow.python.data.experimental import sample_from_datasets, choose_from_datasets
 

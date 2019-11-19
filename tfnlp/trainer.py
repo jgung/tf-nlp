@@ -5,7 +5,6 @@ from typing import Union, Iterable, Callable, Optional
 
 import tensorflow as tf
 import tensorflow_estimator as tfe
-from tensorflow.contrib.estimator import stop_if_no_increase_hook
 from tensorflow.contrib.predictor import from_saved_model
 from tensorflow.contrib.training import HParams
 from tensorflow.python.estimator.export.export import ServingInputReceiver
@@ -14,6 +13,7 @@ from tensorflow.python.estimator.training import train_and_evaluate
 from tensorflow.python.framework import dtypes
 from tensorflow.python.lib.io import file_io
 from tensorflow.python.ops import array_ops
+from tensorflow_estimator.python.estimator.early_stopping import stop_if_no_increase_hook
 
 from tfnlp.cli.evaluators import get_evaluator
 from tfnlp.common import constants
@@ -297,8 +297,7 @@ class Trainer(object):
     def _eval_spec(self, valid):
         exporter = BesterExporter(serving_input_receiver_fn=self._serving_input_fn,
                                   compare_fn=metric_compare_fn(self._training_config.metric),
-                                  exports_to_keep=self._training_config.exports_to_keep,
-                                  strip_default_attrs=False)
+                                  exports_to_keep=self._training_config.exports_to_keep)
 
         return tfe.estimator.EvalSpec(self._input_fn(valid, False),
                                       steps=None,  # evaluate on full validation set

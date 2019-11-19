@@ -80,7 +80,6 @@ class BaseNetworkConfig(Params):
             self.optimizer = OptimizerConfig(optimizer_config)
 
 
-
 class OptimizerConfig(Params):
     def __init__(self, optimizer_config, **kwargs):
         super().__init__(**optimizer_config, **kwargs)

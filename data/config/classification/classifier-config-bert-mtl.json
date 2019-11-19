@@ -1,11 +1,12 @@
 {
   "reader": "tsv_file_key",
-  "batch_size": 32,
+  "batch_size": 16,
+  "max_epochs": 12,
   "optimizer": {
     "name": "bert",
     "lr": {
       "name": "bert",
-      "rate": 0.00005,
+      "rate": 0.00002,
       "warmup_proportion": 0.1
     },
     "clip": 1.0
@@ -21,51 +22,99 @@
         "default_val": "2"
       },
       {
+        "name": "sent",
+        "key": "sent",
+        "rank": 1,
+        "unknown_word": "Declarative",
+        "pad_word": "Declarative",
+        "default_val": "Declarative"
+      },
+      {
+        "name": "qc",
+        "key": "qc",
+        "rank": 1,
+        "unknown_word": "ENTY",
+        "pad_word": "ENTY",
+        "default_val": "ENTY"
+      },
+      {
         "name": "psa",
         "key": "psa",
         "rank": 1,
         "unknown_word": "NEUTRAL",
         "pad_word": "NEUTRAL",
         "default_val": "NEUTRAL"
+      },
+      {
+        "name": "problem",
+        "key": "problem",
+        "rank": 1,
+        "unknown_word": "NONE",
+        "pad_word": "NONE",
+        "default_val": "NONE"
+      },
+      {
+        "name": "ap",
+        "key": "ap",
+        "rank": 1,
+        "unknown_word": "OTHER",
+        "pad_word": "OTHER",
+        "default_val": "OTHER"
       }
     ],
     "inputs": [
       {
         "name": "bert",
-        "drop_subtokens": true
+        "drop_subtokens": false,
+        "output_type": "cls",
+        "model": "https://tfhub.dev/google/albert_large/1"
       }
     ]
   },
   "encoders": [
-    {
-      "name": "bert-no-subtokens",
-      "type": "remove_subtokens",
+   {
+      "name": "identity",
+      "type": "identity",
+      "dropout": 0.0,
       "inputs": [
         "bert"
       ]
-    },
-    {
-      "name": "blstm",
-      "inputs": [
-        "bert-no-subtokens"
-      ],
-      "type": "lstm",
-      "state_size": 512,
-      "encoder_input_dropout": 0.1,
-      "encoder_output_dropout": 0.1,
-      "encoder_layers": 1
     }
   ],
   "heads": [
     {
-      "encoder": "blstm",
+      "encoder": "identity",
       "name": "senti",
       "type": "classifier",
       "metric": "Accuracy"
     },
     {
-      "encoder": "blstm",
+      "encoder": "identity",
+      "name": "sent",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "identity",
+      "name": "qc",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "identity",
       "name": "psa",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "identity",
+      "name": "problem",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "identity",
+      "name": "ap",
       "type": "classifier",
       "metric": "Accuracy"
     }
