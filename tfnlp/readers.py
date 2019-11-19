@@ -2,8 +2,9 @@ import fnmatch
 import os
 import re
 from collections import defaultdict
+
+from absl import logging
 from nltk.tokenize import word_tokenize
-import tensorflow as tf
 from tensorflow.python.lib.io import file_io
 
 from tfnlp.common import constants
@@ -215,7 +216,7 @@ class ConllDepReader(ConllReader):
             try:
                 instance[HEAD_KEY] = [int(x) for x in instance[HEAD_KEY]]
             except ValueError:
-                tf.logging.warning('Unable to read instance: %s', ' '.join(instance[WORD_KEY]))
+                logging.warning('Unable to read instance: %s', ' '.join(instance[WORD_KEY]))
                 if self.extract_invalid:
                     return [None]
                 return []

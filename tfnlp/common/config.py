@@ -1,5 +1,6 @@
 import numbers
 import re
+from absl import logging
 
 import tensorflow as tf
 from bert.optimization import AdamWeightDecayOptimizer
@@ -26,7 +27,7 @@ class BaseNetworkConfig(Params):
         self.batch_size = config.get('batch_size')
         if not self.batch_size:
             self.batch_size = 10
-            tf.logging.warn("No 'batch_size' parameter provided. Using default value of %d", self.batch_size)
+            logging.warning("No 'batch_size' parameter provided. Using default value of %d", self.batch_size)
         self.buffer_size = config.get('buffer_size', 999999)  # in other words, read full dataset into memory by default
         self.batch_buffer_size = config.get('batch_buffer_size', 512)  # number of consecutive batches to shuffle
         self.dataset_caching = config.get('dataset_caching', True)
@@ -62,7 +63,7 @@ class BaseNetworkConfig(Params):
         targets = {}
         for target in self.features.targets:
             if target.name not in {head.name for head in self.heads}:
-                tf.logging.warning("Missing head configuration for target '%s'" % target.name)
+                logging.warning("Missing head configuration for target '%s'" % target.name)
             targets[target.name] = target
         for head in self.heads:
             if head.name not in targets:
@@ -90,7 +91,7 @@ class OptimizerConfig(Params):
         clip = optimizer_config.get('clip')
         if not clip:
             clip = 5.0
-            tf.logging.info("Using default global norm of gradient clipping threshold of %f", clip)
+            logging.info("Using default global norm of gradient clipping threshold of %f", clip)
         self.clip = clip
 
 
@@ -139,11 +140,11 @@ class HeadConfig(Params):
             self.task = constants.TAGGER_KEY
             if 'type' in config:
                 self.task = _TYPE_TASK_MAP.get(config.type, config.type)
-            tf.logging.warn("No 'task' parameter provided for head %s. Using default of %s", self.name, self.task)
+            logging.warning("No 'task' parameter provided for head %s. Using default of %s", self.name, self.task)
 
         self.type = config.get('type')
         if not self.type:
-            tf.logging.warn("No 'type' parameter provided for head %s. Using default of %s", self.name, self.task)
+            logging.warning("No 'type' parameter provided for head %s. Using default of %s", self.name, self.task)
 
         self.zero_init = config.get('zero_init', True)
         self.metric = config.get('metric', constants.OVERALL_KEY)
@@ -237,7 +238,7 @@ def get_optimizer(network_config, default_optimizer=tf.train.AdadeltaOptimizer(l
     try:
         optimizer = network_config.optimizer
     except KeyError:
-        tf.logging.info("Using Adadelta as default optimizer.")
+        logging.info("Using Adadelta as default optimizer.")
         return default_optimizer
     if isinstance(optimizer.lr, numbers.Number):
         lr = optimizer.lr
@@ -283,7 +284,7 @@ def get_l2_loss(network_config, variables):
     all_losses = []
     for var_pattern, alpha in l2_loss.items():
         for var in [v for v in variables if re.match(var_pattern, v.name)]:
-            tf.logging.info('Adding L2 regularization with alpha=%f to %s' % (alpha, var.name))
+            logging.info('Adding L2 regularization with alpha=%f to %s' % (alpha, var.name))
             all_losses.append(alpha * tf.nn.l2_loss(var))
 
     return tf.add_n(all_losses)

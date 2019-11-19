@@ -5,9 +5,11 @@ from itertools import chain
 
 import tensorflow as tf
 import tensorflow_hub as hub
+from absl import logging
 from bert.tokenization import FullTokenizer
 from tensorflow.python.framework.errors_impl import NotFoundError
 from tensorflow.python.lib.io import file_io
+
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_S_CASED_URL, BERT_CLS, BERT_SEP, BERT_SUBLABEL
 from tfnlp.common.constants import ELMO_KEY, END_WORD, INITIALIZER, LENGTH_KEY, PAD_WORD, SENTENCE_INDEX, START_WORD, \
@@ -187,7 +189,7 @@ class FeaturesConfig(object):
 
         targets = features.get('targets')
         if not targets:
-            tf.logging.warn("No 'targets' parameter provided in feature configuration--this could be an error if training.")
+            logging.warning("No 'targets' parameter provided in feature configuration--this could be an error if training.")
             self.targets = []
         else:
             self.targets = [_get_feature(target) for target in targets]
@@ -232,7 +234,7 @@ def get_feature_extractor(config):
 
     bert_feat = next(iter([inp for inp in config.inputs if inp.name == constants.BERT_KEY]), None)
     if bert_feat:
-        tf.logging.info("BERT feature found in inputs, using BERT feature extractor")
+        logging.info("BERT feature found in inputs, using BERT feature extractor")
         contains_marker = len([feat for feat in config.inputs if feat.name == constants.MARKER_KEY]) > 0
         return BertFeatureExtractor(targets=config.targets, features=config.inputs, srl=contains_marker,
                                     drop_subtokens=bert_feat.options['drop_subtokens'],
@@ -244,7 +246,7 @@ def get_feature_extractor(config):
     seq_feat = next((feat for feat in config.targets if feat.name == config.seq_feat),
                     next((feat for feat in config.inputs if feat.name == config.seq_feat), None))
     if not seq_feat:
-        tf.logging.info("No sequence length feature provided with key '%s', automatically creating feature for computing "
+        logging.info("No sequence length feature provided with key '%s', automatically creating feature for computing "
                         "sequence length from this key. " % config.seq_feat)
         seq_feat = SequenceFeature(LENGTH_KEY, config.seq_feat)
     config.inputs.append(LengthFeature(seq_feat))
@@ -800,9 +802,9 @@ def initialize(extractors, resources=''):
             continue
         vectors_path = os.path.join(resources, initializer.embedding)
 
-        tf.logging.info("Initializing vocabulary from pre-trained embeddings at %s", vectors_path)
+        logging.info("Initializing vocabulary from pre-trained embeddings at %s", vectors_path)
         vectors, dim = read_vectors(vectors_path, max_vecs=num_vectors_to_read)
-        tf.logging.info("Read %d vectors of length %d from %s", len(vectors), dim, vectors_path)
+        logging.info("Read %d vectors of length %d from %s", len(vectors), dim, vectors_path)
         for key in vectors:
             feature.feat2index(feature.map(key), count=False)
         if initializer.restrict_vocab:
@@ -844,7 +846,7 @@ def write_vocab(extractors, base_path, resources='', prune=False):
 
         # save embeddings as a serialized numpy matrix to make deserialization faster
         feature.embedding = initialize_embedding_from_dict(vectors, dim, feature.indices, initializer.zero_init)
-        tf.logging.info("Saving %d vectors as embedding for '%s' feature", feature.embedding.shape[0], feature.name)
+        logging.info("Saving %d vectors as embedding for '%s' feature", feature.embedding.shape[0], feature.name)
         serialize(feature.embedding, out_path=base_path, out_name=initializer.pkl_path)
 
 
@@ -1180,9 +1182,9 @@ def write_features(examples, out_path):
         writer = tf.python_io.TFRecordWriter(file.name)
         for i, example in enumerate(examples):
             if i % 4096 == 0 and i > 0:
-                tf.logging.info("... ... ... %d instances written to %s", i, out_path)
+                logging.info("... ... ... %d instances written to %s", i, out_path)
             writer.write(example.SerializeToString())
-        tf.logging.info("Wrote extracted features for %d instances to %s", i + 1, out_path)
+        logging.info("Wrote extracted features for %d instances to %s", i + 1, out_path)
 
 
 def get_default_buckets(lengths, min_count, max_length=None):

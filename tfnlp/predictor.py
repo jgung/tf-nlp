@@ -1,8 +1,9 @@
 import os
 from typing import Callable, Iterable, List, Union, Tuple
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+from absl import logging
 from tensorflow.contrib.predictor import from_saved_model
 
 from tfnlp.cli.formatters import get_formatter
@@ -129,7 +130,7 @@ def from_config_and_savedmodel(path_to_config: str, path_to_savedmodel: str, pat
     """
     config = get_network_config(read_json(path_to_config))
 
-    tf.logging.info("Loading predictor from saved model at %s" % path_to_savedmodel)
+    logging.info("Loading predictor from saved model at %s" % path_to_savedmodel)
     tf_predictor = _default_predictor(path_to_savedmodel)
     parser_function = get_parser(config)
     feature_function = _get_feature_function(config.features, path_to_vocab)

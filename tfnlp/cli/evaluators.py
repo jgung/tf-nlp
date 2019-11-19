@@ -2,7 +2,7 @@ import subprocess
 from typing import List
 
 import numpy as np
-import tensorflow as tf
+from absl import logging
 from tensorflow.python.lib.io import file_io
 
 from tfnlp.common import constants
@@ -56,8 +56,8 @@ class Evaluator(object):
             self.accumulate(instance, result)
             count += 1
             if count % 1024 == 0:
-                tf.logging.info("...Accumulated %d instances for evaluation.", count)
-        tf.logging.info("Evaluating on %d instances...", count)
+                logging.info("...Accumulated %d instances for evaluation.", count)
+        logging.info("Evaluating on %d instances...", count)
         self.evaluate()
 
     def start(self):
@@ -149,7 +149,7 @@ class TaggerEvaluator(Evaluator):
 
     def evaluate(self):
         f1, result_str = conll_eval(self.gold, self.labels, self.indices, output_file=self.output_path + '.txt')
-        tf.logging.info(result_str)
+        logging.info(result_str)
         self.metric, self.summary = f1, result_str
 
 
@@ -214,7 +214,7 @@ class DepParserEvaluator(Evaluator):
 
         res = subprocess.check_output(['perl', self.script_path, '-g', self._gold_path, '-s', self._system_path, '-q'],
                                       universal_newlines=True)
-        tf.logging.info('\n%s', res)
+        logging.info('\n%s', res)
         lines = res.split('\n')
         las = float(lines[0].strip().split()[9])
         self.metric, self.summary = las, res
@@ -238,6 +238,6 @@ class SrlEvaluator(TaggerEvaluator):
         write_props_to_file(self.output_path + '.txt', self.gold, self.markers, self.indices)
 
         result = conll_srl_eval(self.gold, self.labels, self.markers, self.indices)
-        tf.logging.info(str(result))
+        logging.info(str(result))
 
         self.metric, self.summary = result.evaluation.prec_rec_f1()[2], result

@@ -1,4 +1,5 @@
 import tensorflow as tf
+from absl import logging
 from tensorflow.python.training import session_run_hook
 from tensorflow.python.training.session_run_hook import SessionRunArgs
 
@@ -174,7 +175,7 @@ def metric_compare_fn(metric_key):
 
         new = current_eval_result[metric_key]
         prev = best_eval_result[metric_key]
-        tf.logging.info("Comparing new score with previous best (%f vs. %f)", new, prev)
+        logging.info("Comparing new score with previous best (%f vs. %f)", new, prev)
         return prev <= new
 
     return _metric_compare_fn

@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Dict, Tuple
 
 import numpy as np
-import tensorflow as tf
+from absl import logging
 from tensorflow.python.lib.io import file_io
 
 
@@ -34,7 +34,7 @@ def read_vectors(path, max_vecs=1000000) -> Tuple[Dict[str, np.array], int]:
             if dim == 0:
                 dim = len(fields) - 1
             elif dim != len(fields) - 1:
-                tf.logging.warn('Skipping vector with unexpected number of dimensions in line %d: %s', len(vectors), line)
+                logging.warning('Skipping vector with unexpected number of dimensions in line %d: %s', len(vectors), line)
                 continue
             vec = np.array([float(x) for x in fields[1:]], dtype=np.float32)
             vectors[fields[0]] = vec
