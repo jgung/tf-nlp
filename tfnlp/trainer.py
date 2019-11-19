@@ -7,14 +7,7 @@ import tensorflow as tf
 import tensorflow_estimator as tfe
 from absl import logging
 from tensor2tensor.utils.hparam import HParams
-from tensorflow.python.estimator.export.export import ServingInputReceiver
-from tensorflow.python.estimator.run_config import RunConfig
-from tensorflow.python.estimator.training import train_and_evaluate
-from tensorflow.python.framework import dtypes
-from tensorflow.python.lib.io import file_io
-from tensorflow.python.ops import array_ops
 from tensorflow_core.contrib.predictor.predictor_factories import from_saved_model
-from tensorflow_estimator.python.estimator.early_stopping import stop_if_no_increase_hook
 
 from tfnlp.cli.evaluators import get_evaluator
 from tfnlp.common import constants
@@ -101,7 +94,7 @@ class Trainer(object):
         train_spec = self._train_spec(train, max_steps, self._training_hooks(estimator, patience, checkpoint_steps))
         eval_spec = self._eval_spec(valid)
 
-        train_and_evaluate(estimator, train_spec=train_spec, eval_spec=eval_spec)
+        tfe.estimator.train_and_evaluate(estimator, train_spec=train_spec, eval_spec=eval_spec)
 
     def eval(self, test_paths: Union[str, Iterable[str]]) -> None:
         """
@@ -148,8 +141,8 @@ class Trainer(object):
         for test_set in test_paths:
             prediction_path = os.path.join(self._job_dir, os.path.basename(test_set) + '.predictions.txt')
             logging.info('Writing predictions on %s to %s' % (test_set, prediction_path))
-            with file_io.FileIO(prediction_path, mode="w") as output:
-                with file_io.FileIO(test_set, mode="r") as text_lines:
+            with tf.io.gfile.GFile(prediction_path, mode="w") as output:
+                with tf.io.gfile.GFile(test_set, mode="r") as text_lines:
                     for line in text_lines:
                         line = line.strip()
                         if not line:
@@ -191,7 +184,7 @@ class Trainer(object):
             logging.info("Loaded pre-existing vocabulary at %s", self._vocab_path)
         elif train_path:
             logging.info("No valid pre-existing vocabulary found at %s "
-                            "(this is normal when not loading from an existing model)", self._vocab_path)
+                         "(this is normal when not loading from an existing model)", self._vocab_path)
             self._train_vocab(train_path)
         else:
             raise ValueError('No feature vocabulary available at %s and unable to train new vocabulary' % self._vocab_path)
@@ -232,6 +225,7 @@ class Trainer(object):
             for path in split_paths(paths):
                 count += sum(1 for _ in tf.compat.v1.python_io.tf_record_iterator(self._data_path_fn(path)))
             return count
+
         train_count = _count_records(train)
         valid_count = _count_records(valid)
 
@@ -251,12 +245,12 @@ class Trainer(object):
         checkpoint_steps = self._training_config.checkpoint_epochs * steps_per_epoch
 
         logging.info('Training on %d instances at %s, validating on %d instances at %s'
-                        % (train_count, train, valid_count, valid))
+                     % (train_count, train, valid_count, valid))
         logging.info('Training for a maximum of %d epoch(s) (%d steps w/ batch_size=%d)'
-                        % (self._training_config.max_epochs, max_steps, self._training_config.batch_size))
+                     % (self._training_config.max_epochs, max_steps, self._training_config.batch_size))
         if patience < max_steps:
             logging.info('Early stopping after %d epoch(s) (%d steps) with no improvement on validation set'
-                            % (self._training_config.patience_epochs, patience))
+                         % (self._training_config.patience_epochs, patience))
         logging.info('Evaluating every %d steps, %d epoch(s)' % (checkpoint_steps, self._training_config.checkpoint_epochs))
 
         return max_steps, patience, checkpoint_steps
@@ -264,7 +258,7 @@ class Trainer(object):
     def _init_estimator(self, checkpoint_steps):
         return tfe.estimator.Estimator(model_fn=self._model_fn,
                                        model_dir=self._model_path,
-                                       config=RunConfig(
+                                       config=tfe.estimator.RunConfig(
                                            log_step_count_steps=checkpoint_steps // 10,
                                            save_summary_steps=checkpoint_steps,
                                            keep_checkpoint_max=self._training_config.keep_checkpoints,
@@ -272,7 +266,7 @@ class Trainer(object):
                                        params=self._params(test=False))
 
     def _training_hooks(self, estimator, patience, checkpoint_steps):
-        early_stopping = stop_if_no_increase_hook(
+        early_stopping = tfe.estimator.experimental.stop_if_no_increase_hook(
             estimator,
             metric_name=self._training_config.metric,
             max_steps_without_increase=patience,
@@ -286,8 +280,8 @@ class Trainer(object):
 
         if self._debug:
             hooks.append(tf.estimator.ProfilerHook(save_steps=10,
-                                               output_dir=self._job_dir,
-                                               show_memory=True))
+                                                   output_dir=self._job_dir,
+                                                   show_memory=True))
         return hooks
 
     def _train_spec(self, train, max_steps, hooks):
@@ -307,10 +301,10 @@ class Trainer(object):
 
     def _serving_input_fn(self):
         # input has been serialized to a TFRecord string (variable batch size)
-        serialized_tf_example = array_ops.placeholder(dtype=dtypes.string, shape=[None], name=constants.SERVING_PLACEHOLDER)
+        serialized_tf_example = tf.compat.v1.placeholder(dtype=tf.dtypes.string, shape=[None], name=constants.SERVING_PLACEHOLDER)
         # create single padded batch
         batch = padded_batch(self._feature_extractor, serialized_tf_example, self._training_config.batch_size)
-        return ServingInputReceiver(batch, {"examples": serialized_tf_example})
+        return tfe.estimator.export.ServingInputReceiver(batch, {"examples": serialized_tf_example})
 
     def _params(self, test: bool = False):
         return HParams(extractor=self._feature_extractor,

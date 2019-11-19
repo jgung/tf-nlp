@@ -19,7 +19,8 @@ def get_evaluator(heads, feature_extractor, output_path, script_path):
         constants.SRL_KEY: SrlEvaluator,
         constants.NER_KEY: TaggerEvaluator,
         constants.PARSER_KEY: DepParserEvaluator,
-        constants.TOKEN_CLASSIFIER_KEY: TokenClassifierEvaluator
+        constants.TOKEN_CLASSIFIER_KEY: TokenClassifierEvaluator,
+        constants.CLASSIFIER_KEY: TokenClassifierEvaluator,
     }
 
     evals = []
@@ -85,11 +86,14 @@ class AggregateEvaluator(Evaluator):
 
     def evaluate(self):
         total, summaries = 0, []
+        evaluated = 0
         for evaluator in self._evaluators:
             evaluator.evaluate()
-            total += evaluator.metric
-            summaries.append(str(evaluator.summary))
-        self.metric, self.summary = total / len(self._evaluators), '\n'.join(summaries)
+            if evaluator.summary is not None:
+                total += evaluator.metric
+                summaries.append(str(evaluator.summary))
+                evaluated += 1
+        self.metric, self.summary = total / evaluated, '\n'.join(summaries)
 
 
 class TokenClassifierEvaluator(Evaluator):
@@ -108,6 +112,9 @@ class TokenClassifierEvaluator(Evaluator):
         self.indices = []
 
     def accumulate(self, instance, result):
+        if self.labels_key not in instance:
+            return
+
         if self.target.constraints:
             scores = {self.target.index_to_feat(i): score for i, score in enumerate(result[self.scores_name])}
             ck = instance[self.target.constraint_key]
@@ -124,7 +131,11 @@ class TokenClassifierEvaluator(Evaluator):
         self.indices.append(instance[constants.SENTENCE_INDEX])
 
     def evaluate(self):
-        self.metric, self.summary = accuracy_eval(self.gold, self.labels, self.indices, output_file=self.output_path + '.txt'), ''
+        if len(self.gold) == 0:
+            self.metric, self.summary = 0, None
+        else:
+            self.metric = accuracy_eval(self.gold, self.labels, self.indices, output_file=self.output_path + '.txt')
+            self.summary = ''
 
 
 class TaggerEvaluator(Evaluator):
