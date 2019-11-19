@@ -2,7 +2,7 @@ import json
 import os
 import pickle
 
-from tensorflow.python.lib.io import file_io
+import tensorflow as tf
 
 
 class Params(dict):
@@ -49,7 +49,7 @@ def read_json(json_path, as_params=True):
     :param as_params: convert result into a `Params` object with key values accessible through attributes
     :return: attribute dictionary for input JSON
     """
-    with file_io.FileIO(json_path, 'r') as lines:
+    with tf.io.gfile.GFile(json_path, 'r') as lines:
         json_dict = json.load(lines)
         if not as_params:
             return json_dict
@@ -57,7 +57,7 @@ def read_json(json_path, as_params=True):
 
 
 def write_json(value, json_path):
-    with file_io.FileIO(json_path, 'w') as json_out:
+    with tf.io.gfile.GFile(json_path, 'w') as json_out:
         json_out.write(json.dumps(value, indent=4, sort_keys=True))
 
 
@@ -73,7 +73,7 @@ def serialize(serializable, out_path, out_name=None):
             raise
     if os.path.exists(path):
         raise AssertionError("Pre-existing vocabulary file at %s" % path)
-    with file_io.FileIO(path, mode="wb") as out_file:
+    with tf.io.gfile.GFile(path, mode="wb") as out_file:
         pickle.dump(serializable, out_file)
 
 
@@ -81,7 +81,7 @@ def deserialize(in_path, in_name=None):
     if in_name:
         in_name = in_name if in_name.endswith(".pkl") else "{}.pkl".format(in_name)
     path = os.path.join(in_path, in_name) if in_name else in_path
-    with file_io.FileIO(path, mode="rb") as in_file:
+    with tf.io.gfile.GFile(path, mode="rb") as in_file:
         return pickle.load(in_file)
 
 

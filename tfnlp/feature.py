@@ -425,7 +425,7 @@ class Feature(Extractor):
             raise AssertionError("Pre-existing vocabulary file at %s." % path)
         if prune:
             self.prune_vocab()
-        with file_io.FileIO(path, mode='w') as vocab:
+        with tf.io.gfile.GFile(path, mode='w') as vocab:
             for feat in self.ordered_feats():
                 vocab.write('{}\n'.format(feat))
         if self.constraint_key:
@@ -476,7 +476,7 @@ class Feature(Extractor):
         if not file_io.file_exists(path):
             return False
         indices = {}
-        with file_io.FileIO(path, mode='r') as vocab:
+        with tf.io.gfile.GFile(path, mode='r') as vocab:
             for line in vocab:
                 line = line.strip()
                 if line:
@@ -1178,7 +1178,7 @@ def write_features(examples, out_path):
     :param examples:  list of SequenceExample
     :param out_path: output path
     """
-    with file_io.FileIO(out_path, 'w') as file:
+    with tf.io.gfile.GFile(out_path, 'w') as file:
         writer = tf.io.TFRecordWriter(file.name)
         for i, example in enumerate(examples):
             if i % 4096 == 0 and i > 0:

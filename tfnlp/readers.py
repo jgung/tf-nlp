@@ -3,9 +3,9 @@ import os
 import re
 from collections import defaultdict
 
+import tensorflow as tf
 from absl import logging
 from nltk.tokenize import word_tokenize
-from tensorflow.python.lib.io import file_io
 
 from tfnlp.common import constants
 from tfnlp.common.chunk import chunk, convert_conll_to_bio, end_of_chunk, start_of_chunk
@@ -28,7 +28,7 @@ class TsvReader(object):
         :param path: path to single TSV file with labels in the first column and sentences in the second
         :return: labeled sentences
         """
-        with file_io.FileIO(path, 'r') as lines:
+        with tf.io.gfile.GFile(path, 'r') as lines:
             for line in lines:
                 line = line.strip()
                 if line or not self.line_filter(line):
@@ -113,7 +113,7 @@ class ConllReader(object):
         :param path: path to single CoNLL-formatted file
         :return: CoNLL instances
         """
-        with file_io.FileIO(path, 'r') as lines:
+        with tf.io.gfile.GFile(path, 'r') as lines:
             current = []
             for line in lines:
                 line = line.strip()
@@ -178,7 +178,7 @@ class MultiConllReader(object):
         """
         files = []
         try:
-            files = [file_io.FileIO(path + suffix, 'r') for suffix in self.suffixes]
+            files = [tf.io.gfile.GFile(path + suffix, 'r') for suffix in self.suffixes]
             current = []
             for views in zip(*files):
                 views = [line.strip() for line in views]
@@ -370,7 +370,7 @@ class CoNLLSrlPhraseReader(ConllSrlReader):
         if not os.path.isfile(phrase_path):
             raise ValueError('Missing SRL phrase file "{}" for path "{}"'.format(phrase_path, path))
 
-        with file_io.FileIO(path, 'r') as conll_file, file_io.FileIO(phrase_path, 'r') as phrase_file:
+        with tf.io.gfile.GFile(path, 'r') as conll_file, tf.io.gfile.GFile(phrase_path, 'r') as phrase_file:
             current, current_phrases = [], []
             for line, chunk_line in zip(conll_file, phrase_file):
                 line, chunk_line = line.strip(), chunk_line.strip()
@@ -627,7 +627,7 @@ def write_ptb_pos_files(wsj_path, out_dir):
 
     def write_results(expr, output_path):
         id_list = list(filter(lambda x: re.match(expr, x), reader.fileids()))
-        with file_io.FileIO(output_path, 'w') as out_file:
+        with tf.io.gfile.GFile(output_path, 'w') as out_file:
             for tagged_sent in reader.tagged_sents(id_list):
                 for word, tag in filter(lambda x: x[1] != '-NONE-', tagged_sent):
                     out_file.write(word + '\t' + tag + '\n')

@@ -7,8 +7,6 @@ import numpy as np
 import tensorflow as tf
 from absl import logging
 from nltk import ConfusionMatrix
-from tensorflow.python.lib.io import file_io
-from tensorflow.python.lib.io.file_io import get_matching_files
 
 from tfnlp.common.bert import BERT_SUBLABEL, BERT_CLS, BERT_SEP
 from tfnlp.common.chunk import chunk
@@ -44,7 +42,7 @@ def conll_eval(gold_batches, predicted_batches, indices, output_file=None):
             yield ""  # sentence break
 
     if output_file:
-        with file_io.FileIO(output_file, 'w') as output:
+        with tf.io.gfile.GFile(output_file, 'w') as output:
             for line in get_lines():
                 output.write(line + '\n')
 
@@ -94,7 +92,7 @@ def write_props_to_file(output_file,
     :param markers: predicate markers
     :param sentence_ids: sentence indices
     """
-    with file_io.FileIO(output_file, 'w') as output_file:
+    with tf.io.gfile.GFile(output_file, 'w') as output_file:
         for predicates, props_by_predicate in _get_predicates_and_props(labels, markers, sentence_ids):
             # sorting to ensure proposition columns are in correct order (by appearance of predicate in sentence)
             prop_list = [arg for _, arg in sorted(props_by_predicate.items(), key=lambda item: item[0])]
@@ -144,19 +142,19 @@ def append_srl_prediction_output(identifier, result, output_dir, output_confusio
     exists = tf.io.gfile.exists(summary_file) and tf.io.gfile.exists(eval_log)
 
     if not exists:
-        with file_io.FileIO(summary_file, 'w') as summary:
+        with tf.io.gfile.GFile(summary_file, 'w') as summary:
             summary.write('ID\t# Props\t% Perfect\tPrecision\tRecall\tF1\n')
-        with file_io.FileIO(eval_log, 'w') as log:
+        with tf.io.gfile.GFile(eval_log, 'w') as log:
             log.write('%s\n\n' % output_dir)
 
-    with file_io.FileIO(summary_file, 'a') as summary:
+    with tf.io.gfile.GFile(summary_file, 'a') as summary:
         p, r, f1 = result.evaluation.prec_rec_f1()
         summary.write('%s\t%d\t%f\t%f\t%f\t%f\n' % (identifier,
                                                     result.ntargets,
                                                     result.perfect_props(),
                                                     p, r, f1))
 
-    with file_io.FileIO(eval_log, 'a') as eval_log:
+    with tf.io.gfile.GFile(eval_log, 'a') as eval_log:
         eval_log.write('\nID: %s\n' % identifier)
         eval_log.write(str(result) + '\n')
         if output_confusions:
@@ -165,7 +163,7 @@ def append_srl_prediction_output(identifier, result, output_dir, output_confusio
 
 def accuracy_eval(gold_labels, predicted_labels, indices, output_file=None):
     if output_file:
-        with file_io.FileIO(output_file, 'w') as _out_file:
+        with tf.io.gfile.GFile(output_file, 'w') as _out_file:
             # sort by sentence index to maintain original order of instances
             for predicted, index, gold in sorted(zip(predicted_labels, indices, gold_labels), key=lambda k: k[1]):
                 _out_file.write("{}\t{}\t{}\t{}\n".format(index, gold, predicted, '-' if gold != predicted else ''))
@@ -238,22 +236,3 @@ def log_trainable_variables():
     weights.append("Total trainable variables size: %d" % total_size)
     logging.log_first_n(logging.INFO, "Trainable variables:\n%s\n", 1, '\n'.join(weights))
     return total_size
-
-
-CKPT_PATTERN = re.compile('(\\S+\\.ckpt-(\\d+))\\.index')
-
-
-def get_earliest_checkpoint(model_dir):
-    """
-    Returns the path to the earliest checkpoint in a particular model directory.
-    :param model_dir: base model directory containing checkpoints
-    :return: path to earliest checkpoint
-    """
-    ckpts = get_matching_files(os.path.join(model_dir, '*.index'))
-    path_step_ckpts = []
-    for ckpt in ckpts:
-        match = CKPT_PATTERN.search(ckpt)
-        if match:
-            path_step_ckpts.append((match.group(1), int(match.group(2))))
-    # noinspection PyTypeChecker
-    return min(path_step_ckpts, key=lambda x: x[1], default=(None, None))[0]

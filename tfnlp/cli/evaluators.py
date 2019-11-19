@@ -2,8 +2,8 @@ import subprocess
 from typing import List
 
 import numpy as np
+import tensorflow as tf
 from absl import logging
-from tensorflow.python.lib.io import file_io
 
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_SUBLABEL
@@ -181,8 +181,8 @@ class DepParserEvaluator(Evaluator):
         self._line_func = to_conllx_line if 'conllx' in self.script_path else to_conll09_line
 
     def start(self):
-        self._system_file = file_io.FileIO(self._system_path, 'w')
-        self._gold_file = file_io.FileIO(self._gold_path, 'w')
+        self._system_file = tf.io.gfile.GFile(self._system_path, 'w')
+        self._gold_file = tf.io.gfile.GFile(self._gold_path, 'w')
         self._sent_index = -1
         self._sent_arc_probs, self._sent_rel_probs = None, None
         self._sent_gold_arc, self._sent_gold_rel = None, None

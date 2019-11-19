@@ -3,8 +3,8 @@ from collections import OrderedDict
 from typing import Dict, Tuple
 
 import numpy as np
+import tensorflow as tf
 from absl import logging
-from tensorflow.python.lib.io import file_io
 
 
 def random_normal_initializer(_, dim):
@@ -24,7 +24,7 @@ def read_vectors(path, max_vecs=1000000) -> Tuple[Dict[str, np.array], int]:
     """
     vectors = OrderedDict()
     dim = 0
-    with gzip.open(path, 'rt') if path.endswith('gz') else file_io.FileIO(path, 'r') as lines:
+    with gzip.open(path, 'rt') if path.endswith('gz') else tf.io.gfile.GFile(path, 'r') as lines:
         for line in lines:
             if len(vectors) >= max_vecs:
                 break
@@ -43,7 +43,7 @@ def read_vectors(path, max_vecs=1000000) -> Tuple[Dict[str, np.array], int]:
 
 
 def write_vectors(vectors, path):
-    with file_io.FileIO(path, 'w') as lines:
+    with tf.io.gfile.GFile(path, 'w') as lines:
         for word, vector in vectors.items():
             lines.write(word + ' ' + ' '.join([str(ele) for ele in vector]))
             lines.write('\n')
