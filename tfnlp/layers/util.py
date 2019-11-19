@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.crf import crf_log_likelihood
+from tensorflow_addons.text import crf_log_likelihood
 
 from tfnlp.common.training_utils import smoothed_labels
 from tfnlp.layers.layers import numpy_orthogonal_matrix
@@ -118,8 +118,9 @@ def sequence_loss(logits, targets, sequence_lengths, num_labels, crf=False, tag_
                 # handle https://github.com/tensorflow/tensorflow/issues/24397
                 smoothed_targets = smoothed_labels(label_smoothing, logits.dtype, targets)
                 loss = tf.compat.v1.losses.softmax_cross_entropy(onehot_labels=smoothed_targets,
-                                                       logits=logits,
-                                                       weights=tf.cast(tf.sequence_mask(sequence_lengths), dtype=tf.float32))
+                                                                 logits=logits,
+                                                                 weights=tf.cast(tf.sequence_mask(sequence_lengths),
+                                                                                 dtype=tf.float32))
             else:
                 losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=targets)
                 mask = mask if mask is not None else tf.sequence_mask(sequence_lengths)

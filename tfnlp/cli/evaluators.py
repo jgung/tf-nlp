@@ -124,7 +124,7 @@ class TokenClassifierEvaluator(Evaluator):
         else:
             result = result[self.target_key]
             if not isinstance(result, str):
-                result = result.decode('utf-8')
+                result = result.numpy().decode('utf-8')
             self.labels.append(result)
 
         self.gold.append(instance[self.labels_key])

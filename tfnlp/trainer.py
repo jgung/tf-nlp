@@ -7,7 +7,6 @@ import tensorflow as tf
 import tensorflow_estimator as tfe
 from absl import logging
 from tensor2tensor.utils.hparam import HParams
-from tensorflow_core.contrib.predictor.predictor_factories import from_saved_model
 
 from tfnlp.cli.evaluators import get_evaluator
 from tfnlp.common import constants
@@ -20,7 +19,7 @@ from tfnlp.config_builder import read_config
 from tfnlp.datasets import make_dataset, padded_batch
 from tfnlp.feature import get_default_buckets, get_feature_extractor, write_features
 from tfnlp.model.model import multi_head_model_fn
-from tfnlp.predictor import get_latest_savedmodel_from_jobdir, from_job_dir
+from tfnlp.predictor import from_job_dir
 from tfnlp.readers import get_reader
 
 TF_MODEL_FN = Callable[[dict, str, type(HParams)], type(tfe.estimator.EstimatorSpec)]
@@ -171,11 +170,6 @@ class Trainer(object):
             predictions = predictor.predict(sentence)
             for prediction in predictions:
                 print(str(prediction))
-
-    def _get_predictor(self):
-        latest = get_latest_savedmodel_from_jobdir(self._job_dir)
-        logging.info("Loading predictor from saved model at %s" % latest)
-        return from_saved_model(latest)
 
     def _init_feature_extractor(self, train_path: str = None):
         self._feature_extractor = get_feature_extractor(self._training_config.features)

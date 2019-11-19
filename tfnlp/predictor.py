@@ -4,7 +4,6 @@ from typing import Callable, Iterable, List, Union, Tuple
 import numpy as np
 import tensorflow as tf
 from absl import logging
-from tensorflow_core.contrib.predictor.predictor_factories import from_saved_model
 
 from tfnlp.cli.formatters import get_formatter
 from tfnlp.cli.parsers import get_parser
@@ -32,7 +31,7 @@ class Predictor(object):
 
         def _predictor_from_dict(raw_feats: Iterable[dict]) -> dict:
             processed = [feature_function(raw) for raw in raw_feats]
-            return predictor(processed)
+            return predictor(tf.constant(processed))
 
         self._predictor = _predictor_from_dict
         self._parser_function = parser_function
@@ -147,5 +146,6 @@ def _get_feature_function(config: object, path_to_vocab: str) -> Callable[[dict]
 
 
 def _default_predictor(path_to_savedmodel: str) -> Callable[[Iterable[str]], dict]:
-    base_predictor = from_saved_model(path_to_savedmodel)
-    return lambda features: base_predictor({"examples": features})
+    base_predictor = tf.compat.v2.saved_model.load(path_to_savedmodel)
+    infer = base_predictor.signatures["serving_default"]
+    return lambda features: infer(features)

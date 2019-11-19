@@ -3,9 +3,6 @@ import tensorflow as tf
 import tensorflow_estimator as tfe
 import tensorflow_hub as hub
 from absl import logging
-from tensor2tensor.layers.common_attention import add_timing_signal_1d, attention_bias_ignore_padding, multihead_attention
-from tensorflow.contrib.layers import layer_norm
-from tensorflow.contrib.lookup import index_table_from_tensor
 from tensorflow.python.layers import base as base_layer
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import clip_ops
@@ -77,7 +74,9 @@ def string2index(feature_strings, feature):
     """
     with tf.variable_scope('lookup'):
         feats = list(feature.ordered_feats())
-        lookup = index_table_from_tensor(mapping=tf.constant(feats), default_value=feature.unk_index())
+        initializer = tf.lookup.KeyValueTensorInitializer(keys=tf.constant(feats),
+                                                          values=tf.constant(range(0, len(feats))))
+        lookup = tf.lookup.StaticVocabularyTable(initializer,  num_oov_buckets=0)
         return lookup.lookup(feature_strings)
 
 
@@ -149,8 +148,6 @@ def encoder(features, inputs, mode, config):
             return highway_dblstm(inputs[0], features[config.sequence_length_key], training, config)
         elif constants.ENCODER_BLSTM == encoder_type:
             return stacked_bilstm(inputs[0], features[config.sequence_length_key], training, config)
-        elif constants.ENCODER_TRANSFORMER == encoder_type:
-            return transformer_encoder(inputs[0], features[config.sequence_length_key], training, config)
         elif constants.ENCODER_SENTINEL == encoder_type:
             return add_sentinel(inputs)
         elif constants.ENCODER_REMOVE_SUBTOKENS == encoder_type:
@@ -492,65 +489,6 @@ class HighwayLSTMCell(LayerRNNCell):
         return m, new_state
 
 
-def transformer_encoder(inputs, sequence_lengths, training, config):
-    # nonlinear projection of input to dimensionality of transformer (head size x num heads)
-    with tf.variable_scope("encoder_input_proj"):
-        inputs = tf.nn.leaky_relu(tf.layers.dense(inputs, config.head_dim * config.num_heads), alpha=0.1)
-
-    with tf.variable_scope('transformer'):
-        mask = tf.sequence_mask(sequence_lengths, name="padding_mask", dtype=tf.int32)
-        # e.g. give attention bias [0 0 0 0 -inf -inf -inf] for a sequence length of 4 -- don't attend to padding nodes
-        attention_bias = attention_bias_ignore_padding(tf.cast(1 - mask, tf.float32))
-        # add sinusoidal timing signal to give position information to inputs
-        inputs = add_timing_signal_1d(inputs)
-        for i in range(config.encoder_layers):
-            with tf.variable_scope('layer%d' % i):
-                inputs = transformer(inputs, attention_bias, training, config)
-
-    # apply final layer norm
-    inputs = layer_norm(inputs)
-
-    return inputs, config.head_dim * config.num_heads, None
-
-
-def transformer(inputs, attention_bias, training, config):
-    def _layer_norm(_x):
-        return layer_norm(_x, begin_norm_axis=-1, begin_params_axis=-1)
-
-    def _residual(_x, _y):
-        return tf.add(_x, tf.layers.dropout(_y, rate=config.prepost_dropout, training=training))
-
-    self_attention_dim = config.head_dim * config.num_heads
-    with tf.name_scope('transformer_layer'):
-        with tf.variable_scope("self_attention"):
-            # apply layer norm before self attention layer
-            x = _layer_norm(inputs)
-
-            # multi-head self-attention
-            y = multihead_attention(query_antecedent=x, memory_antecedent=None,
-                                    bias=attention_bias,
-                                    total_key_depth=self_attention_dim,
-                                    total_value_depth=self_attention_dim,
-                                    output_depth=self_attention_dim,
-                                    num_heads=config.num_heads,
-                                    dropout_rate=config.attention_dropout if training else 0,
-                                    attention_type="dot_product")
-            x = _residual(x, y)
-
-        with tf.variable_scope("ffnn"):
-            # apply layer norm after self attention layer
-            x = layer_norm(x, begin_norm_axis=-1, begin_params_axis=-1)
-
-            y = _mlp(x,
-                     hidden_size=config.relu_hidden_size,
-                     output_size=self_attention_dim,
-                     keep_prob=(1 - config.relu_dropout) if training else 1.0)
-            # residual connection
-            x = _residual(x, y)
-
-        return x
-
-
 def _ff(name, x, in_dim, out_dim, keep_prob, last=False):
     weights = tf.get_variable(name, [1, 1, in_dim, out_dim])
 
@@ -561,15 +499,3 @@ def _ff(name, x, in_dim, out_dim, keep_prob, last=False):
     else:
         h = tf.squeeze(h, 1)
     return h
-
-
-def _mlp(inputs, hidden_size, output_size, keep_prob):
-    with tf.variable_scope("conv_mlp", [inputs]):
-        inputs = tf.expand_dims(inputs, 1)
-        input_dim = inputs.get_shape().as_list()[-1]
-
-        y = _ff("ff1", inputs, input_dim, hidden_size, keep_prob)
-        y = _ff("ff2", y, hidden_size, hidden_size, keep_prob)
-        y = _ff("ff3", y, hidden_size, output_size, keep_prob, last=True)
-
-        return y

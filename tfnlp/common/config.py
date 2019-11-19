@@ -3,14 +3,12 @@ import re
 from absl import logging
 
 import tensorflow as tf
-from bert.optimization import AdamWeightDecayOptimizer
-from tensorflow.contrib.opt import LazyAdamOptimizer
 from tensorflow.python.training.learning_rate_decay import exponential_decay, inverse_time_decay
+from tensorflow_addons.optimizers import LazyAdam
 
 from tfnlp.common import constants
 from tfnlp.common.utils import Params
-from tfnlp.optim.lazy_adam import LazyAdamOptimizer as LazyNadamOptimizer
-from tfnlp.optim.nadam import NadamOptimizerSparse
+from tfnlp.optim.optimization import create_optimizer
 
 _TYPE_TASK_MAP = {
     constants.BIAFFINE_SRL_KEY: constants.SRL_KEY
@@ -79,7 +77,6 @@ class BaseNetworkConfig(Params):
         optimizer_config = config.get('optimizer')
         if optimizer_config:
             self.optimizer = OptimizerConfig(optimizer_config)
-
 
 
 class OptimizerConfig(Params):
@@ -240,31 +237,32 @@ def get_optimizer(network_config, default_optimizer=tf.compat.v1.train.AdadeltaO
     except KeyError:
         logging.info("Using Adadelta as default optimizer.")
         return default_optimizer
-    if isinstance(optimizer.lr, numbers.Number):
-        lr = optimizer.lr
-    else:
-        optimizer.lr.num_train_steps = network_config.max_steps
-        lr = get_learning_rate(optimizer.lr, tf.compat.v1.train.get_global_step())
 
     name = optimizer.name
     params = optimizer.params
+
+    lr = None
+    if isinstance(optimizer.lr, numbers.Number):
+        lr = optimizer.lr
+    elif name != "bert":
+        optimizer.lr.num_train_steps = network_config.max_steps
+        lr = get_learning_rate(optimizer.lr, tf.compat.v1.train.get_global_step())
+
     if "Adadelta" == name:
         opt = tf.compat.v1.train.AdadeltaOptimizer(lr, **params)
     elif "Adam" == name:
         opt = tf.compat.v1.train.AdamOptimizer(lr, **params)
     elif "LazyAdam" == name:
-        opt = LazyAdamOptimizer(lr, **params)
-    elif "LazyNadam" == name:
-        opt = LazyNadamOptimizer(lr, **params)
+        opt = LazyAdam(lr, **params)
     elif "SGD" == name:
         opt = tf.compat.v1.train.GradientDescentOptimizer(lr)
     elif "Momentum" == name:
         opt = tf.compat.v1.train.MomentumOptimizer(lr, **params)
-    elif "Nadam" == name:
-        opt = NadamOptimizerSparse(lr, **params)
     elif "bert" == name:
-        opt = AdamWeightDecayOptimizer(lr, weight_decay_rate=0.01, beta_1=0.9, beta_2=0.999, epsilon=1e-6,
-                                       exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"])
+        init_lr = optimizer.lr.rate
+        num_train_steps = optimizer.lr.num_train_steps
+        warmup_steps = int(optimizer.lr.warmup_proportion * num_train_steps)
+        opt = create_optimizer(init_lr=init_lr, num_train_steps=num_train_steps, num_warmup_steps=warmup_steps)
     else:
         raise ValueError("Invalid optimizer name: {}".format(name))
     return opt
@@ -306,11 +304,6 @@ def train_op_from_config(config, loss):
 
     global_step = tf.compat.v1.train.get_global_step()
     result = optimizer.apply_gradients(grads_and_vars=zip(gradients, parameters), global_step=global_step)
-    if isinstance(optimizer, AdamWeightDecayOptimizer):
-        # AdamWeightDecayOptimizer does not update the global step, unlike other optimizers
-        new_global_step = global_step + 1
-        train_op = tf.group(result, [global_step.assign(new_global_step)])
-        return train_op
     return result
 
 
