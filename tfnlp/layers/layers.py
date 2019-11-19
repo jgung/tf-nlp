@@ -17,7 +17,6 @@ from tensorflow.python.ops.rnn_cell_impl import DropoutWrapper, LSTMStateTuple, 
 from tensorflow.python.ops.ragged.ragged_array_ops import boolean_mask
 
 from tfnlp.common import constants
-from tfnlp.common.bert import BERT_S_CASED_URL
 
 ELMO_URL = "https://tfhub.dev/google/elmo/2"
 
@@ -32,11 +31,12 @@ def embedding(features, feature_config, training):
                                      as_dict=True)['elmo']
         return elmo_embedding
     elif feature_config.name == constants.BERT_KEY:
-        tf.logging.info("Using BERT module at %s", BERT_S_CASED_URL)
+        model = feature_config.options.get("model")
+        tf.logging.info("Using BERT module at %s", model)
         tags = set()
         if training:
             tags.add("train")
-        bert_module = hub.Module(BERT_S_CASED_URL, tags=tags, trainable=True)
+        bert_module = hub.Module(model, tags=tags, trainable=True)
 
         lens = features[constants.LENGTH_KEY]
         if constants.BERT_LENGTH_KEY in features:
@@ -57,9 +57,11 @@ def embedding(features, feature_config, training):
 
         bert_outputs = bert_module(bert_inputs, signature="tokens", as_dict=True)
         output_type = feature_config.options.get("output_type")
-        bert_embedding = bert_outputs[output_type]
+        bert_embedding = bert_outputs['sequence_output' if output_type == 'cls' else output_type]
         if output_type == "pooled_output":
             bert_embedding = tf.expand_dims(bert_embedding, axis=1)
+        elif output_type == "cls":
+            bert_embedding = tf.expand_dims(bert_embedding[:, 0, :], axis=1)
         return bert_embedding
 
     elif feature_config.has_vocab():
@@ -133,7 +135,7 @@ def encoder(features, inputs, mode, config):
         encoder_type = config.encoder_type
 
         if constants.ENCODER_IDENT == encoder_type:
-            return tf.nn.dropout(inputs[0], keep_prob=1 if training else 1 - config.dropout), inputs[0].shape[-1]
+            return tf.nn.dropout(inputs[0], keep_prob=1 - config.dropout if training else 1), inputs[0].shape[-1]
         elif constants.ENCODER_CONCAT == encoder_type:
             return concat(inputs, training, config)
         elif constants.ENCODER_REPEAT == encoder_type:

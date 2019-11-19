@@ -179,6 +179,7 @@ class FeatureConfig(Params):
         self.constraint_key = feature.get('constraint_key')
         self.drop_subtokens = feature.get('drop_subtokens', False)
         self.output_type = feature.get('output_type', 'sequence_output')
+        self.model = feature.get('model', BERT_S_CASED_URL)
 
 
 class FeaturesConfig(object):
@@ -235,6 +236,7 @@ def get_feature_extractor(config):
         tf.logging.info("BERT feature found in inputs, using BERT feature extractor")
         contains_marker = len([feat for feat in config.inputs if feat.name == constants.MARKER_KEY]) > 0
         return BertFeatureExtractor(targets=config.targets, features=config.inputs, srl=contains_marker,
+                                    model=bert_feat.options['model'],
                                     drop_subtokens=bert_feat.options['drop_subtokens'],
                                     output_type=bert_feat.options['output_type'])
 
@@ -973,6 +975,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         self.label_subtokens = True
         self.drop_subtokens = drop_subtokens
         self.output_type = output_type
+        self.model = model
         bert_module = hub.Module(model)
         tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
         with tf.Session() as sess:
