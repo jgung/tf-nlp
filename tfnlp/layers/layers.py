@@ -67,8 +67,8 @@ def string2index(feature_strings, feature):
     with tf.compat.v1.variable_scope('lookup'):
         feats = list(feature.ordered_feats())
         initializer = tf.lookup.KeyValueTensorInitializer(keys=tf.constant(feats),
-                                                          values=tf.constant(range(0, len(feats))))
-        lookup = tf.lookup.StaticVocabularyTable(initializer, num_oov_buckets=0)
+                                                          values=tf.constant(list(range(0, len(feats))), dtype=tf.int64))
+        lookup = tf.lookup.StaticHashTable(initializer, default_value=feature.unk_index())
         return lookup.lookup(feature_strings)
 
 

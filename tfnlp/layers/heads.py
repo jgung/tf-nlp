@@ -112,11 +112,10 @@ class ClassifierHead(ModelHead):
             inputs = tf.squeeze(self.inputs[0], axis=1)
         else:
             inputs = self.inputs[2]
-            inputs = tf.compat.v1.layers.dropout(inputs, training=self._training)
 
         with tf.compat.v1.variable_scope("logits"):
             num_labels = self.extractor.vocab_size()
-            self.logits = tf.compat.v1.layers.dense(inputs, num_labels, kernel_initializer=tf.compat.v1.zeros_initializer)
+            self.logits = tf.keras.layers.Dense(num_labels, kernel_initializer=tf.compat.v1.zeros_initializer)(inputs)
 
     def _train_eval(self):
         self.loss = tf.cond(pred=tf.reduce_sum(input_tensor=self.features[constants.ACTIVE_TASK_KEY], axis=0)[self.index] > 0,
@@ -216,7 +215,7 @@ class TokenClassifierHead(ClassifierHead):
 
         with tf.compat.v1.variable_scope("logits"):
             num_labels = self.extractor.vocab_size()
-            self.logits = tf.compat.v1.layers.dense(inputs, num_labels, kernel_initializer=tf.compat.v1.zeros_initializer)
+            self.logits = tf.keras.layers.Dense(num_labels, kernel_initializer=tf.compat.v1.zeros_initializer)(inputs)
 
 
 def create_transition_matrix(labels):
@@ -271,7 +270,7 @@ class TaggerHead(ModelHead):
             initializer = tf.compat.v1.zeros_initializer if self.config.zero_init else tf.compat.v1.random_normal_initializer(
                 stddev=0.01)
 
-            dense = tf.compat.v1.layers.dense(inputs, num_labels, kernel_initializer=initializer)
+            dense = tf.keras.layers.Dense(num_labels, kernel_initializer=initializer)(inputs)
             # batch multiplication complete, convert back to a (batch_size x time_steps x num_labels) Tensor
             self.logits = tf.reshape(dense, [-1, time_steps, num_labels], name="unflatten")
         if self.config.crf:

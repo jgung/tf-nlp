@@ -253,7 +253,8 @@ def get_optimizer(network_config, default_optimizer=tf.compat.v1.train.AdadeltaO
     elif "Adam" == name:
         opt = tf.compat.v1.train.AdamOptimizer(lr, **params)
     elif "LazyAdam" == name:
-        opt = LazyAdam(lr, **params)
+        opt = tf.compat.v1.train.AdamOptimizer(lr, **params)
+        # opt = LazyAdam(lr, **params)
     elif "SGD" == name:
         opt = tf.compat.v1.train.GradientDescentOptimizer(lr)
     elif "Momentum" == name:
