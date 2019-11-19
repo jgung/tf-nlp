@@ -1,8 +1,6 @@
 from typing import List, Iterable, Union
 
 import tensorflow as tf
-from tensorflow.python.data.experimental import bucket_by_sequence_length
-from tensorflow.python.data.experimental import sample_from_datasets, choose_from_datasets
 from tensorflow.python.data.ops.dataset_ops import DatasetV1Adapter
 
 from tfnlp.common.constants import LENGTH_KEY
@@ -59,12 +57,16 @@ def make_dataset(extractor,
         dataset = dataset.map(extractor.parse, num_parallel_calls=num_parallel_calls)
 
         # bucket dataset by sequence length, applying random noise to sequences so we don't repeat the same buckets across epochs
-        dataset = dataset.apply(bucket_by_sequence_length(element_length_func=lambda elem: _add_uniform_noise(elem[LENGTH_KEY],
-                                                                                                              length_noise_stdev),
-                                                          bucket_boundaries=bucket_sizes,
-                                                          bucket_batch_sizes=(len(bucket_sizes) + 1) * [batch_size],
-                                                          padded_shapes=extractor.get_shapes(),
-                                                          padding_values=extractor.get_padding()))
+        def _elem_len_func(elem):
+            return _add_uniform_noise(elem[LENGTH_KEY], length_noise_stdev)
+
+        bucket = tf.data.experimental.bucket_by_sequence_length(element_length_func=_elem_len_func,
+                                                                bucket_boundaries=bucket_sizes,
+                                                                bucket_batch_sizes=(len(bucket_sizes) + 1) * [batch_size],
+                                                                padded_shapes=extractor.get_shapes(),
+                                                                padding_values=extractor.get_padding())
+        dataset = dataset.apply(bucket)
+
         if not evaluate:
             # now sort bucketed batches -- maybe not efficient, but let's ensure our training set order is really random
             dataset = dataset.shuffle(batch_buffer_size, seed=random_seed)
@@ -78,9 +80,9 @@ def make_dataset(extractor,
 
     choice_dataset = tf.data.Dataset.range(len(datasets)).repeat()
     if evaluate:
-        result = choose_from_datasets(datasets, choice_dataset)
+        result = tf.data.experimental.choose_from_datasets(datasets, choice_dataset)
     else:
-        result = sample_from_datasets(datasets, weights=_compute_dataset_weights(paths), seed=random_seed)
+        result = tf.data.experimental.sample_from_datasets(datasets, weights=_compute_dataset_weights(paths), seed=random_seed)
 
     return DatasetV1Adapter(result)
 

@@ -12,7 +12,6 @@ from tfnlp.cli.evaluators import get_evaluator
 from tfnlp.common import constants
 from tfnlp.common.config import get_network_config
 from tfnlp.common.eval_hooks import metric_compare_fn
-from tfnlp.common.export import BesterExporter
 from tfnlp.common.logging_utils import set_up_logging
 from tfnlp.common.utils import read_json, write_json, split_paths
 from tfnlp.config_builder import read_config
@@ -284,9 +283,9 @@ class Trainer(object):
                                        hooks=hooks)
 
     def _eval_spec(self, valid):
-        exporter = BesterExporter(serving_input_receiver_fn=self._serving_input_fn,
-                                  compare_fn=metric_compare_fn(self._training_config.metric),
-                                  exports_to_keep=self._training_config.exports_to_keep)
+        exporter = tfe.estimator.BestExporter(serving_input_receiver_fn=self._serving_input_fn,
+                                              compare_fn=metric_compare_fn(self._training_config.metric),
+                                              exports_to_keep=self._training_config.exports_to_keep)
 
         return tfe.estimator.EvalSpec(self._input_fn(valid, False),
                                       steps=None,  # evaluate on full validation set

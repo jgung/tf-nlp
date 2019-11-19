@@ -7,8 +7,6 @@ import tensorflow as tf
 import tensorflow_hub as hub
 from absl import logging
 from bert.tokenization import FullTokenizer
-from tensorflow.python.framework.errors_impl import NotFoundError
-from tensorflow.python.lib.io import file_io
 
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_S_CASED_URL, BERT_CLS, BERT_SEP, BERT_SUBLABEL
@@ -473,7 +471,7 @@ class Feature(Extractor):
         :param path: vocabulary file
         :return: `True` if vocabulary successfully read
         """
-        if not file_io.file_exists(path):
+        if not tf.io.gfile.exists(path):
             return False
         indices = {}
         with tf.io.gfile.GFile(path, mode='r') as vocab:
@@ -488,7 +486,7 @@ class Feature(Extractor):
 
         if self.constraint_key:
             constraint_path = path + ".constraints.txt"
-            if not file_io.file_exists(constraint_path):
+            if not tf.io.gfile.exists(constraint_path):
                 return False
             self.constraints = read_json(constraint_path, as_params=False)
 
@@ -862,7 +860,7 @@ def read_vocab(extractors, base_path):
         try:
             if initializer.embedding:
                 feature.embedding = deserialize(in_path=base_path, in_name=initializer.pkl_path)
-        except NotFoundError:
+        except tf.errors.NotFoundError:
             return False
     return True
 

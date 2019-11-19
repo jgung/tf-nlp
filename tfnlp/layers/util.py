@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow_addons.text import crf_log_likelihood
+import tensorflow_addons as tfa
 
 from tfnlp.common.training_utils import smoothed_labels
 from tfnlp.layers.layers import numpy_orthogonal_matrix
@@ -108,9 +108,9 @@ def sequence_loss(logits, targets, sequence_lengths, num_labels, crf=False, tag_
                   confidence_penalty=0, name="loss", mask=None):
     with tf.compat.v1.variable_scope(name):
         if crf:
-            losses = -crf_log_likelihood(logits, targets,
-                                         sequence_lengths=tf.cast(sequence_lengths, tf.int32),
-                                         transition_params=tag_transitions)[0]
+            losses = -tfa.text.crf_log_likelihood(logits, targets,
+                                                  sequence_lengths=tf.cast(sequence_lengths, tf.int32),
+                                                  transition_params=tag_transitions)[0]
             loss = tf.reduce_mean(input_tensor=losses)  # just average over batch/token-specific losses
         else:
             if label_smoothing > 0:

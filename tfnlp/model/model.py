@@ -2,8 +2,6 @@ from collections import OrderedDict
 
 import tensorflow as tf
 import tensorflow_estimator as tfe
-from tensorflow.python.estimator.export.export_output import PredictOutput
-from tensorflow.python.saved_model import signature_constants
 
 from tfnlp.common import constants
 from tfnlp.common.config import train_op_from_config
@@ -115,10 +113,11 @@ def multi_head_model_fn(features, mode, params):
             export_outputs = {}
             combined_outputs = {}
             for head in heads:
-                export_outputs[head.name] = PredictOutput(head.export_outputs)
+                export_outputs[head.name] = tfe.estimator.export.PredictOutput(head.export_outputs)
                 combined_outputs.update(head.export_outputs)
             # combined signature with all relevant outputs
-            export_outputs[signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY] = PredictOutput(combined_outputs)
+            export_outputs[tf.saved_model.DEFAULT_SERVING_SIGNATURE_DEF_KEY] = tfe.estimator.export.PredictOutput(
+                combined_outputs)
 
         return tfe.estimator.EstimatorSpec(mode=mode,
                                            predictions=predictions,

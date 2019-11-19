@@ -1,10 +1,9 @@
 import numbers
 import re
-from absl import logging
 
 import tensorflow as tf
+from absl import logging
 from tensorflow.python.training.learning_rate_decay import exponential_decay, inverse_time_decay
-from tensorflow_addons.optimizers import LazyAdam
 
 from tfnlp.common import constants
 from tfnlp.common.utils import Params

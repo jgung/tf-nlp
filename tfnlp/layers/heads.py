@@ -2,8 +2,8 @@ import os
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorflow.python.ops.lookup_ops import index_to_string_table_from_file
-from tensorflow_addons.text import crf
 
 from tfnlp.cli.evaluators import TaggerEvaluator, SrlEvaluator, TokenClassifierEvaluator
 from tfnlp.common import constants
@@ -296,7 +296,7 @@ class TaggerHead(ModelHead):
         self.metric = tf.Variable(0, name=append_label(constants.OVERALL_KEY, self.name), dtype=tf.float32, trainable=False)
 
     def _eval_predict(self):
-        predictions = crf.crf_decode(self.logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]
+        predictions = tfa.text.crf.crf_decode(self.logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]
         # optionally mask intermediate subtokens from prediction results
         self.predictions = self._mask_subtokens(predictions)
 
@@ -425,4 +425,4 @@ class BiaffineSrlHead(TaggerHead):
         self.rel_probs = tf.nn.softmax(self.logits, axis=2)  # (b x n x r x n)
         self.n_tokens = tf.cast(tf.reduce_sum(input_tensor=self.features[constants.LENGTH_KEY]), tf.int32)
         _logits = select_logits(self.logits, self.predicate_indices, self.n_steps)  # (b x n x r)
-        self.predictions = crf.crf_decode(_logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]
+        self.predictions = tfa.text.crf.crf_decode(_logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]

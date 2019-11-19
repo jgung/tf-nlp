@@ -1,7 +1,5 @@
 import tensorflow as tf
 from absl import logging
-from tensorflow.python.training import session_run_hook
-from tensorflow.python.training.session_run_hook import SessionRunArgs
 
 from tfnlp.common.config import append_label
 from tfnlp.common.constants import ARC_PROBS, DEPREL_KEY, HEAD_KEY, PREDICT_KEY, REL_PROBS, LABEL_SCORES, ACTIVE_TASK_KEY
@@ -10,7 +8,7 @@ from tfnlp.common.eval import append_srl_prediction_output
 from tfnlp.common.utils import binary_np_array_to_unicode
 
 
-class EvalHook(session_run_hook.SessionRunHook):
+class EvalHook(tf.compat.v1.train.SessionRunHook):
     def __init__(self, tensors, evaluator, label_key=LABEL_KEY, predict_key=PREDICT_KEY, output_dir=None,
                  eval_update=None, eval_placeholder=None):
         """
@@ -36,7 +34,7 @@ class EvalHook(session_run_hook.SessionRunHook):
         self._evaluator.start()
 
     def before_run(self, run_context):
-        return SessionRunArgs(fetches=self._fetches)
+        return tf.compat.v1.train.SessionRunArgs(fetches=self._fetches)
 
     def _create_instances(self, run_context, run_values):
         lengths = run_values.results[LENGTH_KEY]
