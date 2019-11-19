@@ -131,7 +131,7 @@ class SrlEvalHook(SequenceEvalHook):
     def end(self, session):
         super().end(session)
         if self._output_dir:
-            step = session.run(tf.train.get_global_step(session.graph))
+            step = session.run(tf.compat.v1.train.get_global_step(session.graph))
             append_srl_prediction_output(str(step),
                                          self._evaluator.summary,
                                          self._output_dir,

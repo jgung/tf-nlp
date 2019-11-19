@@ -141,7 +141,7 @@ def append_srl_prediction_output(identifier, result, output_dir, output_confusio
     summary_file = os.path.join(output_dir, SUMMARY_FILE)
     eval_log = os.path.join(output_dir, EVAL_LOG)
 
-    exists = tf.gfile.Exists(summary_file) and tf.gfile.Exists(eval_log)
+    exists = tf.io.gfile.exists(summary_file) and tf.io.gfile.exists(eval_log)
 
     if not exists:
         with file_io.FileIO(summary_file, 'w') as summary:
@@ -226,7 +226,7 @@ def log_trainable_variables():
     Log every trainable variable name and shape and return the total number of trainable variables.
     :return: total number of trainable variables
     """
-    all_weights = {variable.name: variable for variable in tf.trainable_variables()}
+    all_weights = {variable.name: variable for variable in tf.compat.v1.trainable_variables()}
     total_size = 0
     weights = []
     for variable_name in sorted(list(all_weights)):

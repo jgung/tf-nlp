@@ -9,7 +9,7 @@ def smoothed_labels(label_smoothing, dtype, onehot_labels):
     :param onehot_labels: one-hot encoding of labels
     :return: smoothed labels
     """
-    num_classes = tf.cast(tf.shape(onehot_labels)[-1], dtype)
+    num_classes = tf.cast(tf.shape(input=onehot_labels)[-1], dtype)
     smooth_positives = 1.0 - label_smoothing
     smooth_negatives = label_smoothing / num_classes
     onehot_labels = onehot_labels * smooth_positives + smooth_negatives
@@ -17,5 +17,5 @@ def smoothed_labels(label_smoothing, dtype, onehot_labels):
 
 
 def assign_ema_weights(ema):
-    moving_avg_variables = tf.get_collection(tf.GraphKeys.MOVING_AVERAGE_VARIABLES)
-    return tf.group(*[tf.assign(x, ema.average(x)) for x in moving_avg_variables])
+    moving_avg_variables = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.MOVING_AVERAGE_VARIABLES)
+    return tf.group(*[tf.compat.v1.assign(x, ema.average(x)) for x in moving_avg_variables])

@@ -4,7 +4,7 @@ from typing import Callable, Iterable, List, Union, Tuple
 import numpy as np
 import tensorflow as tf
 from absl import logging
-from tensorflow.contrib.predictor import from_saved_model
+from tensorflow_core.contrib.predictor.predictor_factories import from_saved_model
 
 from tfnlp.cli.formatters import get_formatter
 from tfnlp.cli.parsers import get_parser

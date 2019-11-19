@@ -39,7 +39,7 @@ class ModelHead(object):
         if self.extractor.has_vocab():
             self.targets = string2index(self.features[self.name], self.extractor)
 
-        with tf.variable_scope(self.name):
+        with tf.compat.v1.variable_scope(self.name):
             self._all()
             self._train_eval()
             self._train()
@@ -49,14 +49,14 @@ class ModelHead(object):
         if self.extractor.has_vocab():
             self.targets = string2index(self.features[self.name], self.extractor)
 
-        with tf.variable_scope(self.name):
+        with tf.compat.v1.variable_scope(self.name):
             self._all()
             self._train_eval()
             self._eval_predict()
             self._evaluation()
 
     def prediction(self):
-        with tf.variable_scope(self.name):
+        with tf.compat.v1.variable_scope(self.name):
             self._all()
             self._eval_predict()
             self._prediction()
@@ -112,31 +112,32 @@ class ClassifierHead(ModelHead):
             inputs = tf.squeeze(self.inputs[0], axis=1)
         else:
             inputs = self.inputs[2]
-            inputs = tf.layers.dropout(inputs, training=self._training)
+            inputs = tf.compat.v1.layers.dropout(inputs, training=self._training)
 
-        with tf.variable_scope("logits"):
+        with tf.compat.v1.variable_scope("logits"):
             num_labels = self.extractor.vocab_size()
-            self.logits = tf.layers.dense(inputs, num_labels, kernel_initializer=tf.zeros_initializer)
+            self.logits = tf.compat.v1.layers.dense(inputs, num_labels, kernel_initializer=tf.compat.v1.zeros_initializer)
 
     def _train_eval(self):
-        self.loss = tf.cond(tf.reduce_sum(self.features[constants.ACTIVE_TASK_KEY], axis=0)[self.index] > 0,
-                            self._loss,
-                            lambda: tf.constant(0, dtype=tf.float32))
+        self.loss = tf.cond(pred=tf.reduce_sum(input_tensor=self.features[constants.ACTIVE_TASK_KEY], axis=0)[self.index] > 0,
+                            true_fn=self._loss,
+                            false_fn=lambda: tf.constant(0, dtype=tf.float32))
         self.metric = tf.Variable(0, name=append_label(constants.ACCURACY_METRIC_KEY, self.name), dtype=tf.float32,
                                   trainable=False)
 
     def _loss(self):
         if self.config.label_smoothing > 0:
             targets = tf.one_hot(self.targets, depth=self.extractor.vocab_size())
-            return tf.losses.softmax_cross_entropy(onehot_labels=targets,
-                                                   logits=self.logits,
-                                                   label_smoothing=self.config.label_smoothing)
+            return tf.compat.v1.losses.softmax_cross_entropy(onehot_labels=targets,
+                                                             logits=self.logits,
+                                                             label_smoothing=self.config.label_smoothing)
         else:
-            return tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.targets))
+            return tf.reduce_mean(
+                input_tensor=tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.targets))
 
     def _eval_predict(self):
         self.scores = tf.nn.softmax(self.logits)  # (b x n)
-        self.predictions = tf.argmax(self.logits, axis=1)
+        self.predictions = tf.argmax(input=self.logits, axis=1)
 
     def training(self):
         super().training()
@@ -152,7 +153,8 @@ class ClassifierHead(ModelHead):
         labels_key = append_label(constants.LABEL_KEY, self.name)
         acc_key = append_label(constants.ACCURACY_METRIC_KEY, self.name)
 
-        self.metric_ops = {acc_key: tf.metrics.accuracy(labels=self.targets, predictions=self.predictions, name=acc_key)}
+        self.metric_ops = {
+            acc_key: tf.compat.v1.metrics.accuracy(labels=self.targets, predictions=self.predictions, name=acc_key)}
 
         tensors = {
             labels_key: self.targets,
@@ -171,7 +173,7 @@ class ClassifierHead(ModelHead):
         self.metric_ops[append_label(constants.ACCURACY_METRIC_KEY, self.name)] = (overall_score, overall_score)
         overall_key = append_label(constants.ACCURACY_METRIC_KEY, self.name)
         # https://github.com/tensorflow/tensorflow/issues/20418 -- metrics don't accept variables, so we create a tensor
-        eval_placeholder = tf.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
+        eval_placeholder = tf.compat.v1.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
 
         self.evaluation_hooks = [
             ClassifierEvalHook(
@@ -183,7 +185,7 @@ class ClassifierHead(ModelHead):
                     target=self.extractor,
                     output_path=os.path.join(self.params.job_dir, self.name + '.dev')),
                 output_dir=self.params.job_dir,
-                eval_update=tf.assign(self.metric, eval_placeholder),
+                eval_update=tf.compat.v1.assign(self.metric, eval_placeholder),
                 eval_placeholder=eval_placeholder,
             )
         ]
@@ -194,7 +196,7 @@ class ClassifierHead(ModelHead):
 
 
 def select_by_token_index(states, indices):
-    row_indices = tf.range(tf.shape(indices, out_type=tf.int64)[0])
+    row_indices = tf.range(tf.shape(input=indices, out_type=tf.int64)[0])
     full_indices = tf.stack([row_indices, indices], axis=1)
     return tf.gather_nd(states, indices=full_indices)
 
@@ -212,9 +214,9 @@ class TokenClassifierHead(ClassifierHead):
             targets = self.features[constants.PREDICATE_INDEX_KEY]
         inputs = select_by_token_index(inputs, targets)
 
-        with tf.variable_scope("logits"):
+        with tf.compat.v1.variable_scope("logits"):
             num_labels = self.extractor.vocab_size()
-            self.logits = tf.layers.dense(inputs, num_labels, kernel_initializer=tf.zeros_initializer)
+            self.logits = tf.compat.v1.layers.dense(inputs, num_labels, kernel_initializer=tf.compat.v1.zeros_initializer)
 
 
 def create_transition_matrix(labels):
@@ -233,7 +235,7 @@ def create_transition_matrix(labels):
                 continue
             elif curr_label[:2] == 'I-' and prev_label != 'B-' + curr_label[2:]:
                 transition_params[i, j] = np.NINF
-    return tf.initializers.constant(transition_params)
+    return tf.compat.v1.initializers.constant(transition_params)
 
 
 class TaggerHead(ModelHead):
@@ -264,20 +266,21 @@ class TaggerHead(ModelHead):
         # flatten encoder outputs to a (batch_size * time_steps x encoder_dim) Tensor for batch matrix multiplication
         inputs = tf.reshape(inputs, [-1, encoder_dim], name="flatten")
 
-        with tf.variable_scope("logits"):
+        with tf.compat.v1.variable_scope("logits"):
             num_labels = self.extractor.vocab_size()
-            initializer = tf.zeros_initializer if self.config.zero_init else tf.random_normal_initializer(stddev=0.01)
+            initializer = tf.compat.v1.zeros_initializer if self.config.zero_init else tf.compat.v1.random_normal_initializer(
+                stddev=0.01)
 
-            dense = tf.layers.dense(inputs, num_labels, kernel_initializer=initializer)
+            dense = tf.compat.v1.layers.dense(inputs, num_labels, kernel_initializer=initializer)
             # batch multiplication complete, convert back to a (batch_size x time_steps x num_labels) Tensor
             self.logits = tf.reshape(dense, [-1, time_steps, num_labels], name="unflatten")
         if self.config.crf:
             # explicitly train a transition matrix
-            self._tag_transitions = tf.get_variable("transitions", [num_labels, num_labels])
+            self._tag_transitions = tf.compat.v1.get_variable("transitions", [num_labels, num_labels])
         else:
             # use constrained decoding based on IOB labels
-            self._tag_transitions = tf.get_variable("transitions", [num_labels, num_labels], trainable=False,
-                                                    initializer=create_transition_matrix(self.extractor))
+            self._tag_transitions = tf.compat.v1.get_variable("transitions", [num_labels, num_labels], trainable=False,
+                                                              initializer=create_transition_matrix(self.extractor))
 
     def _train_eval(self):
         num_labels = self.extractor.vocab_size()
@@ -315,7 +318,7 @@ class TaggerHead(ModelHead):
         self.metric_ops[append_label(constants.OVERALL_KEY, self.name)] = (overall_score, overall_score)
         overall_key = append_label(constants.OVERALL_KEY, self.name)
         # https://github.com/tensorflow/tensorflow/issues/20418 -- metrics don't accept variables, so we create a tensor
-        eval_placeholder = tf.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
+        eval_placeholder = tf.compat.v1.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
 
         if constants.SRL_KEY in self.config.task:
             eval_tensors[constants.MARKER_KEY] = self.features[constants.MARKER_KEY]
@@ -328,7 +331,7 @@ class TaggerHead(ModelHead):
                         output_path=os.path.join(self.params.job_dir, self.name + '.dev')),
                     label_key=labels_key,
                     predict_key=predictions_key,
-                    eval_update=tf.assign(self.metric, eval_placeholder),
+                    eval_update=tf.compat.v1.assign(self.metric, eval_placeholder),
                     eval_placeholder=eval_placeholder,
                     output_confusions=self.params.verbose_eval,
                     output_dir=self.params.job_dir
@@ -343,7 +346,7 @@ class TaggerHead(ModelHead):
                         output_path=os.path.join(self.params.job_dir, self.name + '.dev')),
                     label_key=labels_key,
                     predict_key=predictions_key,
-                    eval_update=tf.assign(self.metric, eval_placeholder),
+                    eval_update=tf.compat.v1.assign(self.metric, eval_placeholder),
                     eval_placeholder=eval_placeholder,
                     output_dir=self.params.job_dir
                 )
@@ -352,11 +355,11 @@ class TaggerHead(ModelHead):
     def _mask_subtokens(self, tensor_with_subtokens):
         mask = self.features.get(constants.SEQUENCE_MASK)
         if constants.BERT_LENGTH_KEY not in self.features and mask is not None:
-            cond = tf.greater(mask, tf.zeros(tf.shape(mask), tf.int64))
+            cond = tf.greater(mask, tf.zeros(tf.shape(input=mask), tf.int64))
             ignore = self.extractor.feat2index(BERT_SUBLABEL)
-            tensor_with_subtokens = tf.where(cond,
-                                             tf.cast(tensor_with_subtokens, tf.int64),
-                                             tf.cast(tf.fill(tf.shape(tensor_with_subtokens), ignore), tf.int64))
+            tensor_with_subtokens = tf.compat.v1.where(cond,
+                                                       tf.cast(tensor_with_subtokens, tf.int64),
+                                                       tf.cast(tf.fill(tf.shape(input=tensor_with_subtokens), ignore), tf.int64))
             return tensor_with_subtokens
         return tensor_with_subtokens
 
@@ -380,18 +383,18 @@ class BiaffineSrlHead(TaggerHead):
         arg_mlp, predicate_mlp = _mlp(self.config.mlp_dim, name="rel_mlp")  # (bn x d), where d == rel_mlp_size
 
         # apply variable class biaffine classifier for semantic role labels
-        with tf.variable_scope("bilinear_logits"):
+        with tf.compat.v1.variable_scope("bilinear_logits"):
             num_labels = self.extractor.vocab_size()  # r
-            initializer = tf.zeros_initializer if self.config.zero_init else None
+            initializer = tf.compat.v1.zeros_initializer if self.config.zero_init else None
             self.logits = bilinear(arg_mlp, predicate_mlp, num_labels, self.n_steps, initializer=initializer)  # (b x n x r x n)
 
         if self.config.crf:
             # explicitly train a transition matrix
-            self._tag_transitions = tf.get_variable("transitions", [num_labels, num_labels])
+            self._tag_transitions = tf.compat.v1.get_variable("transitions", [num_labels, num_labels])
         else:
             # use constrained decoding based on IOB labels
-            self._tag_transitions = tf.get_variable("transitions", [num_labels, num_labels], trainable=False,
-                                                    initializer=create_transition_matrix(self.extractor))
+            self._tag_transitions = tf.compat.v1.get_variable("transitions", [num_labels, num_labels], trainable=False,
+                                                              initializer=create_transition_matrix(self.extractor))
 
         # batch-length vector of predicate indices
         predicate_indices = self.features[constants.PREDICATE_INDEX_KEY]
@@ -421,6 +424,6 @@ class BiaffineSrlHead(TaggerHead):
 
     def _eval_predict(self):
         self.rel_probs = tf.nn.softmax(self.logits, axis=2)  # (b x n x r x n)
-        self.n_tokens = tf.cast(tf.reduce_sum(self.features[constants.LENGTH_KEY]), tf.int32)
+        self.n_tokens = tf.cast(tf.reduce_sum(input_tensor=self.features[constants.LENGTH_KEY]), tf.int32)
         _logits = select_logits(self.logits, self.predicate_indices, self.n_steps)  # (b x n x r)
         self.predictions = crf.crf_decode(_logits, self._tag_transitions, tf.cast(self._sequence_lengths, tf.int32))[0]

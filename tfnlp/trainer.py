@@ -56,7 +56,7 @@ class Trainer(object):
         self._job_dir = save_dir_path
 
         config_path = os.path.join(self._job_dir, constants.CONFIG_PATH)
-        if not tf.gfile.Exists(config_path):
+        if not tf.io.gfile.exists(config_path):
             write_json(config, config_path)
         if not config:
             config = read_json(config_path)
@@ -220,7 +220,7 @@ class Trainer(object):
     def _extract_and_write(self, path: str, test: bool = False):
         for file in split_paths(path):
             output_path = self._data_path_fn(file)
-            if tf.gfile.Exists(output_path):
+            if tf.io.gfile.exists(output_path):
                 logging.info("Using pre-existing features for %s from %s", file, output_path)
                 return
             examples = self._extract_features(file, test)
@@ -230,7 +230,7 @@ class Trainer(object):
         def _count_records(paths):
             count = 0
             for path in split_paths(paths):
-                count += sum(1 for _ in tf.python_io.tf_record_iterator(self._data_path_fn(path)))
+                count += sum(1 for _ in tf.compat.v1.python_io.tf_record_iterator(self._data_path_fn(path)))
             return count
         train_count = _count_records(train)
         valid_count = _count_records(valid)
@@ -285,7 +285,7 @@ class Trainer(object):
         hooks = [early_stopping]
 
         if self._debug:
-            hooks.append(tf.train.ProfilerHook(save_steps=10,
+            hooks.append(tf.estimator.ProfilerHook(save_steps=10,
                                                output_dir=self._job_dir,
                                                show_memory=True))
         return hooks
@@ -381,11 +381,11 @@ def cli():
 
     # write configuration file to model path, applying any updates/overrides if this is the first time training
     config_path = os.path.join(opts.save, constants.CONFIG_PATH)
-    if not tf.gfile.Exists(config_path):
+    if not tf.io.gfile.exists(config_path):
         if not opts.config:
             raise AssertionError('trainer configuration is required when training for the first time')
         config = read_config(opts.config, opts.config_overrides, opts.param_overrides)
-        tf.gfile.MakeDirs(opts.save)
+        tf.io.gfile.makedirs(opts.save)
         write_json(config, config_path)
 
     trainer = Trainer(save_dir_path=opts.save,

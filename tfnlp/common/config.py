@@ -185,8 +185,8 @@ def _bert_learning_rate(lr_config, global_step):
     init_lr = lr_config.rate
     warmup_steps = int(lr_config.warmup_proportion * lr_config.num_train_steps)
     learning_rate = tf.constant(value=init_lr, shape=[], dtype=tf.float32)
-    # Implements linear decay of the learning rate.
-    learning_rate = tf.train.polynomial_decay(
+    # Implements linear decay of the learning rate. TODO: switch to the schedules in `tf.keras.optimizers.schedules`.
+    learning_rate = tf.compat.v1.train.polynomial_decay(
         learning_rate,
         global_step,
         lr_config.num_train_steps,
@@ -217,7 +217,7 @@ def _transformer_learning_rate(lr_config, global_step):
     if warmup_steps > 0:
         # add 1 to global_step so that we start at 1 instead of 0
         global_step_float = tf.cast(global_step, tf.float32) + 1.
-        lr *= tf.minimum(tf.rsqrt(global_step_float),
+        lr *= tf.minimum(tf.math.rsqrt(global_step_float),
                          tf.multiply(global_step_float, warmup_steps ** -decay_rate))
         return lr
     else:
@@ -228,7 +228,7 @@ def _transformer_learning_rate(lr_config, global_step):
             return lr
 
 
-def get_optimizer(network_config, default_optimizer=tf.train.AdadeltaOptimizer(learning_rate=1.0)):
+def get_optimizer(network_config, default_optimizer=tf.compat.v1.train.AdadeltaOptimizer(learning_rate=1.0)):
     """
     Return the optimizer given by the input network configuration, or a default optimizer.
     :param network_config: network configuration
@@ -244,22 +244,22 @@ def get_optimizer(network_config, default_optimizer=tf.train.AdadeltaOptimizer(l
         lr = optimizer.lr
     else:
         optimizer.lr.num_train_steps = network_config.max_steps
-        lr = get_learning_rate(optimizer.lr, tf.train.get_global_step())
+        lr = get_learning_rate(optimizer.lr, tf.compat.v1.train.get_global_step())
 
     name = optimizer.name
     params = optimizer.params
     if "Adadelta" == name:
-        opt = tf.train.AdadeltaOptimizer(lr, **params)
+        opt = tf.compat.v1.train.AdadeltaOptimizer(lr, **params)
     elif "Adam" == name:
-        opt = tf.train.AdamOptimizer(lr, **params)
+        opt = tf.compat.v1.train.AdamOptimizer(lr, **params)
     elif "LazyAdam" == name:
         opt = LazyAdamOptimizer(lr, **params)
     elif "LazyNadam" == name:
         opt = LazyNadamOptimizer(lr, **params)
     elif "SGD" == name:
-        opt = tf.train.GradientDescentOptimizer(lr)
+        opt = tf.compat.v1.train.GradientDescentOptimizer(lr)
     elif "Momentum" == name:
-        opt = tf.train.MomentumOptimizer(lr, **params)
+        opt = tf.compat.v1.train.MomentumOptimizer(lr, **params)
     elif "Nadam" == name:
         opt = NadamOptimizerSparse(lr, **params)
     elif "bert" == name:
@@ -294,17 +294,17 @@ def train_op_from_config(config, loss):
     optimizer = get_optimizer(config)
     clip_norm = config.optimizer.clip
 
-    parameters = tf.trainable_variables()
+    parameters = tf.compat.v1.trainable_variables()
 
     # optionally add L2 loss to specific weights, or globally
     l2_loss = get_l2_loss(config, parameters)
     if l2_loss is not None:
         loss += l2_loss
 
-    gradients = tf.gradients(loss, parameters)
+    gradients = tf.gradients(ys=loss, xs=parameters)
     gradients = tf.clip_by_global_norm(gradients, clip_norm=clip_norm)[0]
 
-    global_step = tf.train.get_global_step()
+    global_step = tf.compat.v1.train.get_global_step()
     result = optimizer.apply_gradients(grads_and_vars=zip(gradients, parameters), global_step=global_step)
     if isinstance(optimizer, AdamWeightDecayOptimizer):
         # AdamWeightDecayOptimizer does not update the global step, unlike other optimizers

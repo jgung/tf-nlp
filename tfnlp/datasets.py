@@ -19,7 +19,7 @@ def _compute_dataset_weights(datasets):
     total = 0
     weights = []
     for path in datasets:
-        count = float(sum(1 for _ in tf.python_io.tf_record_iterator(path)))
+        count = float(sum(1 for _ in tf.compat.v1.python_io.tf_record_iterator(path)))
         total += count
         weights.append(count)
     return [weight / total for weight in weights]
@@ -88,6 +88,6 @@ def padded_batch(extractor, placeholder, batch_size=64):
     dataset = tf.data.Dataset.from_tensor_slices(placeholder)
     dataset = dataset.map(lambda x: extractor.parse(x, train=False))
     dataset = dataset.padded_batch(batch_size, extractor.get_shapes(train=False), extractor.get_padding(train=False))
-    iterator = dataset.make_initializable_iterator()
+    iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
     with tf.control_dependencies([iterator.initializer]):
         return iterator.get_next()

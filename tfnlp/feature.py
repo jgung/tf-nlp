@@ -247,7 +247,7 @@ def get_feature_extractor(config):
                     next((feat for feat in config.inputs if feat.name == config.seq_feat), None))
     if not seq_feat:
         logging.info("No sequence length feature provided with key '%s', automatically creating feature for computing "
-                        "sequence length from this key. " % config.seq_feat)
+                     "sequence length from this key. " % config.seq_feat)
         seq_feat = SequenceFeature(LENGTH_KEY, config.seq_feat)
     config.inputs.append(LengthFeature(seq_feat))
     # add a feature that indicates the presence of labels for each task (sorted by order of targets in feature extractor)
@@ -741,13 +741,13 @@ def get_feature_spec(extractors):
         if type(feature) == DummyExtractor:
             continue  # dummy feature
         elif feature.name == constants.ACTIVE_TASK_KEY:
-            context_features[feature.name] = tf.FixedLenFeature([feature.dim], dtype=feature.dtype)
+            context_features[feature.name] = tf.io.FixedLenFeature([feature.dim], dtype=feature.dtype)
         elif feature.rank == 1:
-            context_features[feature.name] = tf.FixedLenFeature([], dtype=feature.dtype)
+            context_features[feature.name] = tf.io.FixedLenFeature([], dtype=feature.dtype)
         elif feature.rank == 2:
-            sequence_features[feature.name] = tf.FixedLenSequenceFeature([], dtype=feature.dtype)
+            sequence_features[feature.name] = tf.io.FixedLenSequenceFeature([], dtype=feature.dtype)
         elif feature.rank == 3:
-            sequence_features[feature.name] = tf.FixedLenSequenceFeature([feature.max_len], dtype=feature.dtype)
+            sequence_features[feature.name] = tf.io.FixedLenSequenceFeature([feature.max_len], dtype=feature.dtype)
         else:
             raise AssertionError("Unexpected feature rank value: {}".format(feature.rank))
 
@@ -913,7 +913,7 @@ class FeatureExtractor(BaseFeatureExtractor):
     def parse(self, example, train=True):
         context_features, sequence_features = get_feature_spec(self.extractors(train))
 
-        context_parsed, sequence_parsed = tf.parse_single_sequence_example(
+        context_parsed, sequence_parsed = tf.io.parse_single_sequence_example(
             serialized=example,
             context_features=context_features,
             sequence_features=sequence_features
@@ -977,7 +977,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         self.output_type = output_type
         bert_module = hub.Module(model)
         tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
-        with tf.Session() as sess:
+        with tf.compat.v1.Session() as sess:
             vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"],
                                                   tokenization_info["do_lower_case"]])
 
@@ -1118,15 +1118,15 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         context_features, sequence_features = get_feature_spec(self.extractors(train))
 
         def int64_sequence_feature():
-            return tf.FixedLenSequenceFeature([], dtype=tf.int64)
+            return tf.io.FixedLenSequenceFeature([], dtype=tf.int64)
 
         sequence_features[constants.BERT_KEY] = int64_sequence_feature()
         sequence_features[constants.SEQUENCE_MASK] = int64_sequence_feature()
         if self.srl:
-            context_features[constants.PREDICATE_INDEX_KEY] = tf.FixedLenFeature([], dtype=tf.int64)
-            context_features[constants.BERT_SPLIT_INDEX] = tf.FixedLenFeature([], dtype=tf.int64)
+            context_features[constants.PREDICATE_INDEX_KEY] = tf.io.FixedLenFeature([], dtype=tf.int64)
+            context_features[constants.BERT_SPLIT_INDEX] = tf.io.FixedLenFeature([], dtype=tf.int64)
 
-        context_parsed, sequence_parsed = tf.parse_single_sequence_example(
+        context_parsed, sequence_parsed = tf.io.parse_single_sequence_example(
             serialized=example,
             context_features=context_features,
             sequence_features=sequence_features
@@ -1179,7 +1179,7 @@ def write_features(examples, out_path):
     :param out_path: output path
     """
     with file_io.FileIO(out_path, 'w') as file:
-        writer = tf.python_io.TFRecordWriter(file.name)
+        writer = tf.io.TFRecordWriter(file.name)
         for i, example in enumerate(examples):
             if i % 4096 == 0 and i > 0:
                 logging.info("... ... ... %d instances written to %s", i, out_path)

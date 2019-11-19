@@ -76,7 +76,7 @@ def multi_head_model_fn(features, mode, params):
         # compute loss for each target
         losses = [head.loss for head in heads]
         # just compute mean over losses (possibly consider a more sophisticated strategy?)
-        loss = losses[0] if len(losses) == 1 else tf.reduce_mean(tf.stack(losses))
+        loss = losses[0] if len(losses) == 1 else tf.reduce_mean(input_tensor=tf.stack(losses))
 
     dependencies = []
     # optionally setup exponential moving average of parameters
@@ -162,14 +162,14 @@ def model_head(config, inputs, features, mode, params):
 
 
 def _exponential_moving_average_op(mode, ema_decay):
-    ema = tf.train.ExponentialMovingAverage(ema_decay, num_updates=tf.train.get_global_step(), zero_debias=True)
-    ema_op = ema.apply(tf.trainable_variables())
-    tf.logging.debug("Using EMA for variables: %s" % str([v.name for v in tf.trainable_variables()]))
+    ema = tf.train.ExponentialMovingAverage(ema_decay, num_updates=tf.compat.v1.train.get_global_step(), zero_debias=True)
+    ema_op = ema.apply(tf.compat.v1.trainable_variables())
+    tf.compat.v1.logging.debug("Using EMA for variables: %s" % str([v.name for v in tf.compat.v1.trainable_variables()]))
 
-    tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, ema_op)
+    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, ema_op)
 
     # only use EMA averages when evaluating
-    ema_dep = tf.cond(tf.equal(mode, tfe.estimator.ModeKeys.TRAIN),
-                      lambda: tf.no_op(),
-                      lambda: assign_ema_weights(ema))
+    ema_dep = tf.cond(pred=tf.equal(mode, tfe.estimator.ModeKeys.TRAIN),
+                      true_fn=lambda: tf.no_op(),
+                      false_fn=lambda: assign_ema_weights(ema))
     return ema_dep
