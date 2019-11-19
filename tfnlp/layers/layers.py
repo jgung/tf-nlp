@@ -4,15 +4,7 @@ import tensorflow_estimator as tfe
 import tensorflow_hub as hub
 from absl import logging
 from tensorflow.python.layers import base as base_layer
-from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import clip_ops
-from tensorflow.python.ops import init_ops
-from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import nn_ops
-from tensorflow.python.ops.ragged.ragged_array_ops import boolean_mask
-from tensorflow.python.ops.rnn import bidirectional_dynamic_rnn
-from tensorflow.python.ops.rnn import dynamic_rnn
-from tensorflow.python.ops.rnn_cell_impl import DropoutWrapper, LSTMStateTuple, LayerRNNCell
+from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell
 
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_S_CASED_URL
@@ -40,11 +32,11 @@ def embedding(features, feature_config, training):
         if constants.BERT_LENGTH_KEY in features:
             lens = features[constants.BERT_LENGTH_KEY]
         if constants.BERT_SPLIT_INDEX in features:
-            max_sequence_length = tf.reduce_max(lens)
+            max_sequence_length = tf.reduce_max(input_tensor=lens)
             mask = tf.sequence_mask(features[constants.BERT_SPLIT_INDEX], maxlen=max_sequence_length)  # e.g. [1, 1, ..., 0, 0]
             segment_ids = tf.cast(tf.math.logical_not(mask), dtype=tf.int32)  # e.g. [0, 0, ..., 1, 1]
         else:
-            segment_ids = tf.zeros(tf.shape(features[constants.BERT_KEY]), dtype=tf.int32)
+            segment_ids = tf.zeros(tf.shape(input=features[constants.BERT_KEY]), dtype=tf.int32)
 
         bert_inputs = dict(
             input_ids=tf.cast(features[constants.BERT_KEY], tf.int32),
@@ -72,56 +64,56 @@ def string2index(feature_strings, feature):
     :param feature: feature extractor with string to index vocabulary
     :return: feature id Tensor
     """
-    with tf.variable_scope('lookup'):
+    with tf.compat.v1.variable_scope('lookup'):
         feats = list(feature.ordered_feats())
         initializer = tf.lookup.KeyValueTensorInitializer(keys=tf.constant(feats),
                                                           values=tf.constant(range(0, len(feats))))
-        lookup = tf.lookup.StaticVocabularyTable(initializer,  num_oov_buckets=0)
+        lookup = tf.lookup.StaticVocabularyTable(initializer, num_oov_buckets=0)
         return lookup.lookup(feature_strings)
 
 
 def get_embedding_input(inputs, feature, training):
     config = feature.config
 
-    with tf.variable_scope(feature.name):
+    with tf.compat.v1.variable_scope(feature.name):
         feature_ids = string2index(inputs, feature)
 
-        with tf.variable_scope('embedding'):
+        with tf.compat.v1.variable_scope('embedding'):
             initializer = None
             if training:
                 if feature.embedding is not None:
                     initializer = embedding_initializer(feature.embedding)
                 elif config.initializer.zero_init:
                     logging.info("Zero init for feature embedding: %s", feature.name)
-                    initializer = tf.zeros_initializer
+                    initializer = tf.compat.v1.zeros_initializer
                 else:
                     logging.info("Xavier Uniform init for feature embedding: %s", feature.name)
-                    initializer = tf.glorot_uniform_initializer
+                    initializer = tf.compat.v1.glorot_uniform_initializer
 
-            embedding_matrix = tf.get_variable(name='parameters',
-                                               shape=[feature.vocab_size(), config.dim],
-                                               initializer=initializer,
-                                               trainable=config.trainable)
+            embedding_matrix = tf.compat.v1.get_variable(name='parameters',
+                                                         shape=[feature.vocab_size(), config.dim],
+                                                         initializer=initializer,
+                                                         trainable=config.trainable)
             result = tf.nn.embedding_lookup(params=embedding_matrix, ids=feature_ids,
                                             name='lookup')  # wrapper of gather
 
             if config.dropout > 0:
-                result = tf.layers.dropout(result,
-                                           rate=config.dropout,
-                                           training=training,
-                                           name='dropout')
+                result = tf.compat.v1.layers.dropout(result,
+                                                     rate=config.dropout,
+                                                     training=training,
+                                                     name='dropout')
 
         if 'func' in config:  # reduce multiple vectors per token to a single vector
-            with tf.name_scope('reduce'):
+            with tf.compat.v1.name_scope('reduce'):
                 result = config.func.apply(result)
 
         if config.word_dropout > 0 and training:
-            shape = tf.shape(result)
-            result = tf.layers.dropout(result,
-                                       rate=config.word_dropout,
-                                       training=training,
-                                       name='word_dropout',
-                                       noise_shape=[shape[0], shape[1], 1])
+            shape = tf.shape(input=result)
+            result = tf.compat.v1.layers.dropout(result,
+                                                 rate=config.word_dropout,
+                                                 training=training,
+                                                 name='word_dropout',
+                                                 noise_shape=[shape[0], shape[1], 1])
 
         return result
 
@@ -129,11 +121,11 @@ def get_embedding_input(inputs, feature, training):
 def encoder(features, inputs, mode, config):
     training = mode == tfe.estimator.ModeKeys.TRAIN
 
-    with tf.variable_scope("encoder-%s" % config.name):
+    with tf.compat.v1.variable_scope("encoder-%s" % config.name):
         encoder_type = config.encoder_type
 
         if constants.ENCODER_IDENT == encoder_type:
-            return tf.nn.dropout(inputs[0], keep_prob=1 if training else 1 - config.dropout), inputs[0].shape[-1]
+            return tf.nn.dropout(inputs[0], rate=1 - (1 if training else 1 - config.dropout)), inputs[0].shape[-1]
         elif constants.ENCODER_CONCAT == encoder_type:
             return concat(inputs, training, config)
         elif constants.ENCODER_REPEAT == encoder_type:
@@ -161,9 +153,9 @@ def add_sentinel(inputs):
     Add a trainable head/sentinel token to inputs of same dimensionality as previous inputs.
     """
     inputs = get_encoder_input(inputs[0])
-    shape = tf.shape(inputs, out_type=tf.int64)  # (b, n, d)
+    shape = tf.shape(input=inputs, out_type=tf.int64)  # (b, n, d)
 
-    sentinel = tf.get_variable(name='sentinel', shape=[inputs.shape[-1]], trainable=True)
+    sentinel = tf.compat.v1.get_variable(name='sentinel', shape=[inputs.shape[-1]], trainable=True)
     tiled = tf.tile(tf.reshape(sentinel, [1, 1, inputs.shape[-1]]), [shape[0], 1, 1])
     result = tf.concat([tiled, inputs], axis=1)
     return result
@@ -176,7 +168,7 @@ def remove_subtokens(inputs, mask):
     if len(inputs) != 1:
         raise AssertionError("'%s' cannot have multiple inputs" % constants.ENCODER_REMOVE_SUBTOKENS)
     inputs = get_encoder_input(inputs[0])
-    return boolean_mask(inputs, tf.cast(mask, tf.bool), keepdims=True).to_tensor()
+    return tf.ragged.boolean_mask(inputs, tf.cast(mask, tf.bool), keepdims=True).to_tensor()
 
 
 def repeat(inputs, token_indices):
@@ -187,7 +179,7 @@ def repeat(inputs, token_indices):
         raise AssertionError("'%s' cannot have multiple inputs" % constants.ENCODER_REPEAT)
     inputs = get_encoder_input(inputs[0])
 
-    shape = tf.shape(inputs, out_type=tf.int64)  # (b, n, d)
+    shape = tf.shape(input=inputs, out_type=tf.int64)  # (b, n, d)
     batch_indices = tf.range(shape[0])  # [0, 1, 2, ..., b]
     full_indices = tf.stack([batch_indices, token_indices], axis=1)  # e.g [[0, 1, 2, ..., b], [3, 5, 11, ..., 4]]
     predicates = tf.gather_nd(inputs, indices=full_indices)  # (b x d)
@@ -202,10 +194,10 @@ def concat_single_to_sequence(inputs, training, config):
     if len(inputs) != 2:
         raise AssertionError("'%s' must have exactly 2 inputs" % constants.ENCODER_REPEAT_AND_CONCAT)
     single, sequence = inputs
-    tiled = tf.tile(tf.expand_dims(single, 1), [1, tf.shape(sequence)[1], 1])
+    tiled = tf.tile(tf.expand_dims(single, 1), [1, tf.shape(input=sequence)[1], 1])
     result = tf.concat([tiled, sequence], axis=-1)
     if config.input_dropout > 0:
-        result = tf.layers.dropout(result, rate=config.input_dropout, training=training, name='input_layer_dropout')
+        result = tf.compat.v1.layers.dropout(result, rate=config.input_dropout, training=training, name='input_layer_dropout')
     return result
 
 
@@ -214,7 +206,7 @@ def mlp(inputs, training, config):
         raise AssertionError("'%s' cannot have multiple inputs" % constants.ENCODER_MLP)
     inputs = get_encoder_input(inputs[0])
 
-    with tf.variable_scope("conv_mlp", [inputs]):
+    with tf.compat.v1.variable_scope("conv_mlp", [inputs]):
         inputs = tf.expand_dims(inputs, 1)
         input_dim = inputs.get_shape().as_list()[-1]
         hidden_size = config.dim
@@ -239,7 +231,7 @@ def concat(inputs, training, config):
     result = tf.concat(inputs, -1, name="inputs")
     # apply dropout across entire layer
     if config.input_dropout > 0:
-        result = tf.layers.dropout(result, rate=config.input_dropout, training=training, name='input_layer_dropout')
+        result = tf.compat.v1.layers.dropout(result, rate=config.input_dropout, training=training, name='input_layer_dropout')
     return result
 
 
@@ -267,28 +259,28 @@ def highway_dblstm(inputs, sequence_lengths, training, config):
 
     def highway_lstm_cell(size):
         _cell = HighwayLSTMCell(size, highway=True, initializer=numpy_orthogonal_initializer)
-        return DropoutWrapper(_cell, variational_recurrent=True, dtype=tf.float32,
-                              state_keep_prob=keep_prob,
-                              input_keep_prob=input_keep_prob,
-                              output_keep_prob=output_keep_prob)
+        return tf.compat.v1.nn.rnn_cell.DropoutWrapper(_cell, variational_recurrent=True, dtype=tf.float32,
+                                                       state_keep_prob=keep_prob,
+                                                       input_keep_prob=input_keep_prob,
+                                                       output_keep_prob=output_keep_prob)
 
     def _reverse(_input):
-        return array_ops.reverse_sequence(input=_input, seq_lengths=sequence_lengths, seq_axis=1, batch_axis=0)
+        return tf.reverse_sequence(input=_input, seq_lengths=sequence_lengths, seq_axis=1, batch_axis=0)
 
     outputs = None
     final_state = None
-    with tf.variable_scope("dblstm"):
+    with tf.compat.v1.variable_scope("dblstm"):
         cells = [highway_lstm_cell(config.state_size) for _ in range(config.encoder_layers)]
 
         for i, cell in enumerate(cells):
             odd = i % 2 == 1
-            with tf.variable_scope("%s-%s" % ('bw' if odd else 'fw', i // 2)) as layer_scope:
+            with tf.compat.v1.variable_scope("%s-%s" % ('bw' if odd else 'fw', i // 2)) as layer_scope:
                 inputs = _reverse(inputs) if odd else inputs
 
-                outputs, final_state = dynamic_rnn(cell=cell, inputs=inputs,
-                                                   sequence_length=sequence_lengths,
-                                                   dtype=tf.float32,
-                                                   scope=layer_scope)
+                outputs, final_state = tf.compat.v1.nn.dynamic_rnn(cell=cell, inputs=inputs,
+                                                                   sequence_length=sequence_lengths,
+                                                                   dtype=tf.float32,
+                                                                   scope=layer_scope)
 
                 outputs = _reverse(outputs) if odd else outputs
             inputs = outputs
@@ -302,21 +294,24 @@ def stacked_bilstm(inputs, sequence_lengths, training, config):
     output_keep_prob = (1.0 - config.encoder_output_dropout) if training else 1.0
 
     def cell(_size, name=None):
-        _cell = tf.nn.rnn_cell.LSTMCell(config.state_size, name=name, initializer=orthogonal_initializer(4),
-                                        forget_bias=config.forget_bias)
-        return DropoutWrapper(_cell, variational_recurrent=True, dtype=tf.float32,
-                              input_size=_size,
-                              output_keep_prob=output_keep_prob,
-                              state_keep_prob=keep_prob,
-                              input_keep_prob=input_keep_prob)
+        _cell = tf.compat.v1.nn.rnn_cell.LSTMCell(config.state_size, name=name, initializer=orthogonal_initializer(4),
+                                                  forget_bias=config.forget_bias)
+        return tf.compat.v1.nn.rnn_cell.DropoutWrapper(_cell, variational_recurrent=True, dtype=tf.float32,
+                                                       input_size=_size,
+                                                       output_keep_prob=output_keep_prob,
+                                                       state_keep_prob=keep_prob,
+                                                       input_keep_prob=input_keep_prob)
 
     outputs = inputs
     fw_state, bw_state = None, None
     for i in range(config.encoder_layers):
-        with tf.variable_scope("biRNN_%d" % i):
+        with tf.compat.v1.variable_scope("biRNN_%d" % i):
             size = outputs.get_shape().as_list()[-1]
-            outputs, (fw_state, bw_state) = bidirectional_dynamic_rnn(cell_fw=cell(size), cell_bw=cell(size), inputs=outputs,
-                                                                      sequence_length=sequence_lengths, dtype=tf.float32)
+            outputs, (fw_state, bw_state) = tf.compat.v1.nn.bidirectional_dynamic_rnn(cell_fw=cell(size),
+                                                                                      cell_bw=cell(size),
+                                                                                      inputs=outputs,
+                                                                                      sequence_length=sequence_lengths,
+                                                                                      dtype=tf.float32)
             outputs = tf.concat(outputs, axis=-1, name="Concatenate_biRNN_outputs_%d" % i)
     return outputs, config.state_size * 2, tf.concat([fw_state.h, bw_state.h], axis=1)
 
@@ -396,9 +391,9 @@ class HighwayLSTMCell(LayerRNNCell):
         self._cell_clip = cell_clip
         self._initializer = initializer
         self._forget_bias = forget_bias
-        self._activation = activation or math_ops.tanh
+        self._activation = activation or tf.math.tanh
 
-        self._state_size = (LSTMStateTuple(num_units, num_units))
+        self._state_size = (tf.compat.v1.nn.rnn_cell.LSTMStateTuple(num_units, num_units))
         self._output_size = num_units
 
         # initialized in self.build
@@ -430,7 +425,7 @@ class HighwayLSTMCell(LayerRNNCell):
         self._bias = self.add_variable(
             "bias",
             shape=[num_splits * self._num_units],
-            initializer=init_ops.zeros_initializer(dtype=self.dtype))
+            initializer=tf.zeros_initializer(dtype=self.dtype))
 
         num_splits = self._highway and 5 or 4
         self._hidden_kernel = tf.concat([self.add_variable(
@@ -442,7 +437,7 @@ class HighwayLSTMCell(LayerRNNCell):
 
     # noinspection PyMethodOverriding
     def call(self, inputs, state):
-        sigmoid = math_ops.sigmoid
+        sigmoid = tf.math.sigmoid
 
         (c_prev, m_prev) = state
 
@@ -451,13 +446,13 @@ class HighwayLSTMCell(LayerRNNCell):
             raise ValueError("Could not infer input size from inputs.get_shape()[-1]")
 
         # i = input_gate, j = new_input, f = forget_gate, o = output_gate, r = transform gate
-        input_matrix = math_ops.matmul(inputs, self._input_kernel)
-        input_matrix = nn_ops.bias_add(input_matrix, self._bias)
+        input_matrix = tf.linalg.matmul(inputs, self._input_kernel)
+        input_matrix = tf.nn.bias_add(input_matrix, self._bias)
 
-        hidden_matrix = math_ops.matmul(m_prev, self._hidden_kernel)
+        hidden_matrix = tf.linalg.matmul(m_prev, self._hidden_kernel)
 
         if self._highway:
-            i, j, f, o, r = array_ops.split(hidden_matrix + input_matrix[:, :-self._num_units], num_or_size_splits=5, axis=1)
+            i, j, f, o, r = tf.split(hidden_matrix + input_matrix[:, :-self._num_units], num_or_size_splits=5, axis=1)
             hx = input_matrix[:, -self._num_units:]
 
             i = sigmoid(i)
@@ -466,14 +461,14 @@ class HighwayLSTMCell(LayerRNNCell):
             j = self._activation(j)
             c = f * c_prev + i * j
             if self._cell_clip is not None:
-                c = clip_ops.clip_by_value(c, -self._cell_clip, self._cell_clip)
+                c = tf.clip_by_value(c, -self._cell_clip, self._cell_clip)
 
             t = sigmoid(r)
             _m = o * self._activation(c)
             m = t * _m + (1 - t) * hx
 
         else:
-            i, j, f, o = array_ops.split(value=input_matrix + hidden_matrix, num_or_size_splits=4, axis=1)
+            i, j, f, o = tf.split(value=input_matrix + hidden_matrix, num_or_size_splits=4, axis=1)
 
             i = sigmoid(i)
             o = sigmoid(o)
@@ -481,21 +476,21 @@ class HighwayLSTMCell(LayerRNNCell):
             c = i * self._activation(j) + f * c_prev
 
             if self._cell_clip is not None:
-                c = clip_ops.clip_by_value(c, -self._cell_clip, self._cell_clip)
+                c = tf.clip_by_value(c, -self._cell_clip, self._cell_clip)
 
             m = o * self._activation(c)
 
-        new_state = (LSTMStateTuple(c, m))
+        new_state = (tf.compat.v1.nn.rnn_cell.LSTMStateTuple(c, m))
         return m, new_state
 
 
 def _ff(name, x, in_dim, out_dim, keep_prob, last=False):
-    weights = tf.get_variable(name, [1, 1, in_dim, out_dim])
+    weights = tf.compat.v1.get_variable(name, [1, 1, in_dim, out_dim])
 
-    h = tf.nn.conv2d(x, filter=weights, strides=[1, 1, 1, 1], padding="SAME")
+    h = tf.nn.conv2d(input=x, filters=weights, strides=[1, 1, 1, 1], padding="SAME")
     if not last:
         h = tf.nn.leaky_relu(h, alpha=0.1)
-        h = tf.nn.dropout(h, keep_prob)
+        h = tf.nn.dropout(h, 1 - keep_prob)
     else:
         h = tf.squeeze(h, 1)
     return h
