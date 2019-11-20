@@ -7,7 +7,7 @@ from tensorflow.python.layers import base as base_layer
 from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell
 
 from tfnlp.common import constants
-from tfnlp.common.bert import BERT_S_CASED_URL
+from tfnlp.common.bert import BERT_S_CASED_URL_TF1
 
 ELMO_URL = "https://tfhub.dev/google/elmo/2"
 
@@ -22,11 +22,11 @@ def embedding(features, feature_config, training):
                                      as_dict=True)['elmo']
         return elmo_embedding
     elif feature_config.name == constants.BERT_KEY:
-        logging.info("Using BERT module at %s", BERT_S_CASED_URL)
+        logging.info("Using BERT module at %s", BERT_S_CASED_URL_TF1)
         tags = set()
         if training:
             tags.add("train")
-        bert_module = hub.Module(BERT_S_CASED_URL, tags=tags, trainable=True)
+        bert_module = hub.Module(BERT_S_CASED_URL_TF1, tags=tags, trainable=True)
 
         lens = features[constants.LENGTH_KEY]
         if constants.BERT_LENGTH_KEY in features:
@@ -47,9 +47,11 @@ def embedding(features, feature_config, training):
 
         bert_outputs = bert_module(bert_inputs, signature="tokens", as_dict=True)
         output_type = feature_config.options.get("output_type")
-        bert_embedding = bert_outputs[output_type]
+        bert_embedding = bert_outputs['sequence_output' if output_type == 'cls' else output_type]
         if output_type == "pooled_output":
             bert_embedding = tf.expand_dims(bert_embedding, axis=1)
+        elif output_type == "cls":
+            bert_embedding = tf.expand_dims(bert_embedding[:, 0, :], axis=1)
         return bert_embedding
 
     elif feature_config.has_vocab():
@@ -168,7 +170,7 @@ def remove_subtokens(inputs, mask):
     if len(inputs) != 1:
         raise AssertionError("'%s' cannot have multiple inputs" % constants.ENCODER_REMOVE_SUBTOKENS)
     inputs = get_encoder_input(inputs[0])
-    return tf.ragged.boolean_mask(inputs, tf.cast(mask, tf.bool), keepdims=True).to_tensor()
+    return tf.ragged.boolean_mask(inputs, tf.cast(mask, tf.bool)).to_tensor()
 
 
 def repeat(inputs, token_indices):

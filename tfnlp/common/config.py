@@ -4,10 +4,9 @@ import re
 import tensorflow as tf
 from absl import logging
 from tensorflow.python.training.learning_rate_decay import exponential_decay, inverse_time_decay
-
 from tfnlp.common import constants
 from tfnlp.common.utils import Params
-from tfnlp.optim.optimization import create_optimizer
+from tfnlp.optim.optimization import create_optimizer, AdamWeightDecayOptimizer
 
 _TYPE_TASK_MAP = {
     constants.BIAFFINE_SRL_KEY: constants.SRL_KEY
@@ -243,9 +242,10 @@ def get_optimizer(network_config, default_optimizer=tf.compat.v1.train.AdadeltaO
     lr = None
     if isinstance(optimizer.lr, numbers.Number):
         lr = optimizer.lr
-    elif name != "bert":
+    else:
         optimizer.lr.num_train_steps = network_config.max_steps
-        lr = get_learning_rate(optimizer.lr, tf.compat.v1.train.get_global_step())
+        if name != "bert":
+            lr = get_learning_rate(optimizer.lr, tf.compat.v1.train.get_global_step())
 
     if "Adadelta" == name:
         opt = tf.compat.v1.train.AdadeltaOptimizer(lr, **params)
@@ -259,10 +259,9 @@ def get_optimizer(network_config, default_optimizer=tf.compat.v1.train.AdadeltaO
     elif "Momentum" == name:
         opt = tf.compat.v1.train.MomentumOptimizer(lr, **params)
     elif "bert" == name:
-        init_lr = optimizer.lr.rate
-        num_train_steps = optimizer.lr.num_train_steps
-        warmup_steps = int(optimizer.lr.warmup_proportion * num_train_steps)
-        opt = create_optimizer(init_lr=init_lr, num_train_steps=num_train_steps, num_warmup_steps=warmup_steps)
+        opt = create_optimizer(optimizer.lr.rate, optimizer.lr.num_train_steps,
+                               int(optimizer.lr.warmup_proportion * optimizer.lr.num_train_steps),
+                               tf.compat.v1.train.get_global_step())
     else:
         raise ValueError("Invalid optimizer name: {}".format(name))
     return opt
@@ -304,6 +303,11 @@ def train_op_from_config(config, loss):
 
     global_step = tf.compat.v1.train.get_global_step()
     result = optimizer.apply_gradients(grads_and_vars=zip(gradients, parameters), global_step=global_step)
+    if isinstance(optimizer, AdamWeightDecayOptimizer):
+        # AdamWeightDecayOptimizer does not update the global step, unlike other optimizers
+        new_global_step = global_step + 1
+        train_op = tf.group(result, [global_step.assign(new_global_step)])
+        return train_op
     return result
 
 
