@@ -4,3 +4,4 @@ absl-py
 nltk
 tensorflow-hub
 tensor2tensor
+sentencepiece

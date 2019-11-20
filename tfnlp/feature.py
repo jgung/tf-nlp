@@ -6,10 +6,10 @@ from itertools import chain
 import tensorflow as tf
 import tensorflow_hub as hub
 from absl import logging
-from common import tokenization
+from tfnlp.common import bert_tokenization, albert_tokenization
 
 from tfnlp.common import constants
-from tfnlp.common.bert import BERT_S_CASED_URL, BERT_CLS, BERT_SEP, BERT_SUBLABEL
+from tfnlp.common.bert import BERT_S_CASED_URL, BERT_CLS, BERT_SEP, BERT_SUBLABEL, BERT_S_CASED_URL_TF1
 from tfnlp.common.constants import ELMO_KEY, END_WORD, INITIALIZER, LENGTH_KEY, PAD_WORD, SENTENCE_INDEX, START_WORD, \
     UNKNOWN_WORD
 from tfnlp.common.embedding import initialize_embedding_from_dict, read_vectors
@@ -179,6 +179,7 @@ class FeatureConfig(Params):
         self.constraint_key = feature.get('constraint_key')
         self.drop_subtokens = feature.get('drop_subtokens', False)
         self.output_type = feature.get('output_type', 'sequence_output')
+        self.model = feature.get('model', BERT_S_CASED_URL_TF1)
 
 
 class FeaturesConfig(object):
@@ -235,6 +236,7 @@ def get_feature_extractor(config):
         logging.info("BERT feature found in inputs, using BERT feature extractor")
         contains_marker = len([feat for feat in config.inputs if feat.name == constants.MARKER_KEY]) > 0
         return BertFeatureExtractor(targets=config.targets, features=config.inputs, srl=contains_marker,
+                                    model=bert_feat.options['model'],
                                     drop_subtokens=bert_feat.options['drop_subtokens'],
                                     output_type=bert_feat.options['output_type'])
 
@@ -953,20 +955,20 @@ class BertLengthFeature(Extractor):
         vals = super().get_values(sequence)
         tokens = [BERT_CLS]
         for val in vals:
-            tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(val))
+            tokens.extend(self.tokenizer(val))
         tokens.append(BERT_SEP)
 
         if self.srl:
             # condition on predicate, e.g. [[cls], sentence, [sep], predicate, [sep]]
             predicate_token = vals[sequence[constants.PREDICATE_INDEX_KEY]]
-            tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token))
+            tokens.extend(self.tokenizer(predicate_token))
             tokens.append(BERT_SEP)
 
         return tokens
 
 
 class BertFeatureExtractor(BaseFeatureExtractor):
-    def __init__(self, targets, features=None, srl=False, model=BERT_S_CASED_URL, drop_subtokens=False,
+    def __init__(self, targets, features=None, srl=False, model=BERT_S_CASED_URL_TF1, drop_subtokens=False,
                  output_type="sequence_output") -> None:
         super().__init__()
         self.srl = srl
@@ -974,17 +976,24 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         self.drop_subtokens = drop_subtokens
         self.output_type = output_type
 
-        bert_layer = hub.KerasLayer(model)
-        vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
-        do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
+        bert_layer = hub.load(model)
+        # TODO: this sucks, but seems like a necessary evil until Albert bugfixes are made
+        vocab_file = [path for path in [s.asset_path.numpy().decode('utf-8') for s in bert_layer.asset_paths]
+                      if path.endswith('.model') or path.endswith('vocab.txt')][0]
+        self.do_lower_case = bert_layer.signatures['tokenization_info']()['do_lower_case'].numpy()
 
-        self.tokenizer = tokenization.FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
+        tokenization = albert_tokenization if 'albert' in model else bert_tokenization
+        tokenizer = tokenization.FullTokenizer(vocab_file=vocab_file, do_lower_case=self.do_lower_case,
+                                               spm_model_file=vocab_file if vocab_file.endswith('.model') else None)
+        self.convert_to_ids = lambda x: tokenizer.convert_tokens_to_ids(x)
+        self.tokenize = lambda x: tokenizer.tokenize(x)
+
         self.targets = {target.name: target for target in targets}
         self.ordered_targets = [target.name for target in targets]
 
         len_name = constants.BERT_LENGTH_KEY if self.drop_subtokens else constants.LENGTH_KEY
         self.features = {
-            len_name: BertLengthFeature(self.tokenizer, srl=srl, name=len_name),
+            len_name: BertLengthFeature(self.tokenize, srl=srl, name=len_name),
             SENTENCE_INDEX: index_feature(),
             constants.ACTIVE_TASK_KEY: TaskIndicator(self.ordered_targets),
             **{feature.name: feature for feature in features}
@@ -1034,7 +1043,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
                 if i == predicate_index:
                     focus_index = predicate_index if self.drop_subtokens else len(split_tokens)
 
-            sub_tokens = self.tokenizer.wordpiece_tokenizer.tokenize(word)
+            sub_tokens = self.tokenize(word)
             split_tokens.extend(sub_tokens)
             mask.append(1)
             mask.extend([0] * (len(sub_tokens) - 1))
@@ -1064,7 +1073,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
             segment_index = len(split_tokens)
             # condition on predicate, e.g. [[cls], sentence, [sep], predicate, [sep]]
             predicate_token = words[instance[constants.PREDICATE_INDEX_KEY]]
-            predicate_subtokens = self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token)
+            predicate_subtokens = self.tokenize(predicate_token)
             split_tokens.extend(predicate_subtokens)
             split_tokens.append(BERT_SEP)
             mask.extend((1 + len(predicate_subtokens)) * [0])
@@ -1072,7 +1081,7 @@ class BertFeatureExtractor(BaseFeatureExtractor):
                 for target, labels in split_labels.items():
                     labels.extend((1 + len(predicate_subtokens)) * [BERT_SUBLABEL])
 
-        ids = self.tokenizer.convert_tokens_to_ids(split_tokens)
+        ids = self.convert_to_ids(split_tokens)
 
         # (2) convert IDs to TF Record proto format -----------------------------------------------------------------------------
         feature_list = {}

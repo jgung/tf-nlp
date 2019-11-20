@@ -22,11 +22,12 @@ def embedding(features, feature_config, training):
                                      as_dict=True)['elmo']
         return elmo_embedding
     elif feature_config.name == constants.BERT_KEY:
-        logging.info("Using BERT module at %s", BERT_S_CASED_URL_TF1)
         tags = set()
         if training:
             tags.add("train")
-        bert_module = hub.Module(BERT_S_CASED_URL_TF1, tags=tags, trainable=True)
+        model = feature_config.options.get("model")
+        logging.info("Using BERT module at %s", BERT_S_CASED_URL_TF1)
+        bert_module = hub.Module(model, tags=tags, trainable=True)
 
         lens = features[constants.LENGTH_KEY]
         if constants.BERT_LENGTH_KEY in features:
