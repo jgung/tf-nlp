@@ -1,7 +1,6 @@
-absl
 numpy
-tensorflow-gpu==1.13.1
+tensorflow==2.0.0
+absl-py
 nltk
 tensorflow-hub
 tensor2tensor
-bert-tensorflow

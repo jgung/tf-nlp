@@ -6,7 +6,7 @@ from itertools import chain
 import tensorflow as tf
 import tensorflow_hub as hub
 from absl import logging
-from bert.tokenization import FullTokenizer
+from common import tokenization
 
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_S_CASED_URL, BERT_CLS, BERT_SEP, BERT_SUBLABEL
@@ -973,13 +973,12 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         self.label_subtokens = True
         self.drop_subtokens = drop_subtokens
         self.output_type = output_type
-        bert_module = hub.Module(model)
-        tokenization_info = bert_module(signature="tokenization_info", as_dict=True)
-        with tf.compat.v1.Session() as sess:
-            vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"],
-                                                  tokenization_info["do_lower_case"]])
 
-        self.tokenizer = FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
+        bert_layer = hub.KerasLayer(model)
+        vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
+        do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
+
+        self.tokenizer = tokenization.FullTokenizer(vocab_file=vocab_file, do_lower_case=do_lower_case)
         self.targets = {target.name: target for target in targets}
         self.ordered_targets = [target.name for target in targets]
 
