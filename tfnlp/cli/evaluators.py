@@ -8,7 +8,6 @@ import tensorflow as tf
 from sklearn.metrics import classification_report
 from tensorflow.python.framework.errors_impl import NotFoundError
 from tensorflow.python.lib.io import file_io
-
 from tfnlp.common import constants
 from tfnlp.common.bert import BERT_SUBLABEL
 from tfnlp.common.config import append_label
@@ -212,7 +211,7 @@ class TaggerEvaluator(Evaluator):
 
     def accumulate(self, instance, result):
         self.labels.append([label for label in result[self.target_key] if label != BERT_SUBLABEL])
-        self.gold.append([label for label in instance[self.labels_key] if label != BERT_SUBLABEL])
+        self.gold.append([label for label in instance['vn'] if label != BERT_SUBLABEL])
         self.indices.append(instance[constants.SENTENCE_INDEX])
 
     def evaluate(self, identifier=None):
@@ -372,7 +371,7 @@ class SrlEvaluator(TaggerEvaluator):
             elif PROPS.get(POLYSEMOUS) and len(SENSES.get(lemma, [])) <= 1:
                 return
 
-        sense = instance.get(constants.SENSE_KEY)
+        sense = instance.get(constants.SENSE_PRED_KEY)
         if sense is not None and isinstance(sense, str):
             self.senses.append((instance[constants.PREDICATE_INDEX_KEY],
                                 instance[constants.PREDICATE_LEMMA] + '.' + sense))
@@ -383,7 +382,8 @@ class SrlEvaluator(TaggerEvaluator):
         write_props_to_file(self.output_path + '.gold.txt', self.gold, self.markers, self.indices)
         write_props_to_file(self.output_path + '.txt', self.labels, self.markers, self.indices)
 
-        result = conll_srl_eval(self.gold, self.labels, self.markers, self.indices, self.senses)
+        result = conll_srl_eval(self.gold, self.labels, self.markers, self.indices, self.senses,
+                                mappings_file='vn-mappings.json')
         res = str(result)
         tf.logging.info(res)
         p, r, f1 = result.evaluation.prec_rec_f1()

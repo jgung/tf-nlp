@@ -66,7 +66,7 @@ def conll_srl_eval(gold_batches, predicted_batches, markers, ids, senses=None, m
     if mappings_file and file_io.file_exists(mappings_file):
         mappings = read_json(mappings_file, as_params=False)
     gold_props = _convert_to_sentences(labels=gold_batches, markers=markers, sentence_ids=ids, senses=senses,
-                                       mappings=mappings, gold=True)
+                                       mappings=None, gold=True)
     pred_props = _convert_to_sentences(labels=predicted_batches, markers=markers, sentence_ids=ids, senses=senses,
                                        mappings=mappings)
     return evaluate(gold_props, pred_props)
@@ -92,21 +92,22 @@ def _convert_to_sentences(labels: List[Iterable[str]],
                 if sense == 'x':
                     continue
                 roleset_mappings = mappings.get(sense, {})
+                if not roleset_mappings:
+                    tf.logging.info('Missing sense: %s ' % sense)
                 for index, label in enumerate(sent):
                     match = label_matcher.match(label)
                     if match:
                         val = match.group(1)
                         mapped = roleset_mappings.get(val)
                         if not mapped:
-                            if gold and not (val.startswith("ARGM") or val == "V"):
-                                tf.logging.info('Missing mapping for %s / %s' % (sense, label))
+                            if val == "ARG0":
+                                mapped = "Agent"
+                            if val == "ARG1":
+                                mapped = "Theme"
                         if not mapped:
-                            if val == "PAG":
-                                mapped = "0"
-                            elif val == "PPT":
-                                mapped = "1"
-                            else:
-                                mapped = val
+                            if not (val.startswith("AM") or val.startswith("ARGM") or val == "V"):
+                                tf.logging.info('Missing mapping for %s / %s / %s' % (sense, label, val))
+                            continue
                         sent[index] = label.replace(val, mapped)
 
         sentences.append(current_sentence)
