@@ -1,7 +1,8 @@
 {
   "reader": "conll_2005_phrase",
-  "max_epochs": 32,
-  "patience_epochs": 16,
+  "max_epochs": 512,
+  "checkpoint_epochs": 128,
+  "patience_epochs": 256,
   "batch_size": 80,
   "optimizer": {
     "name": "LazyAdam",
@@ -14,7 +15,7 @@
       "rate": 0.0001,
       "params": {
         "max_lr": 0.001,
-        "step_size": 4
+        "step_size": 64
       }
     },
     "clip": 1.0
