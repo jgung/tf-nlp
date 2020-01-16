@@ -22,11 +22,12 @@ def embedding(features, feature_config, training):
                                      as_dict=True)['elmo']
         return elmo_embedding
     elif feature_config.name == constants.BERT_KEY:
-        logging.info("Using BERT module at %s", BERT_S_CASED_URL_TF1)
+        model = feature_config.options.get("model")
+        logging.info("Using BERT module at %s", model)
         tags = set()
         if training:
             tags.add("train")
-        bert_module = hub.Module(BERT_S_CASED_URL_TF1, tags=tags, trainable=True)
+        bert_module = hub.Module(model, tags=tags, trainable=True)
 
         lens = features[constants.LENGTH_KEY]
         if constants.BERT_LENGTH_KEY in features:
@@ -127,7 +128,7 @@ def encoder(features, inputs, mode, config):
         encoder_type = config.encoder_type
 
         if constants.ENCODER_IDENT == encoder_type:
-            return tf.nn.dropout(inputs[0], rate=1 - (1 if training else 1 - config.dropout)), inputs[0].shape[-1]
+            return tf.nn.dropout(inputs[0], rate=config.dropout if training else 0), inputs[0].shape[-1]
         elif constants.ENCODER_CONCAT == encoder_type:
             return concat(inputs, training, config)
         elif constants.ENCODER_REPEAT == encoder_type:
