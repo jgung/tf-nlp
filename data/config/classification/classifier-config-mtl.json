@@ -1,0 +1,137 @@
+{
+  "reader": "tsv_file_key",
+  "batch_size": 10,
+  "optimizer": {
+    "name": "LazyAdam",
+    "params": {
+      "beta1": 0.9,
+      "beta2": 0.9
+    },
+    "lr": 0.001,
+    "clip": 5.0
+  },
+  "features": {
+    "targets": [
+      {
+        "name": "senti",
+        "key": "senti",
+        "rank": 1,
+        "unknown_word": "2",
+        "pad_word": "2",
+        "default_val": "2"
+      },
+      {
+        "name": "sent",
+        "key": "sent",
+        "rank": 1,
+        "unknown_word": "Declarative",
+        "pad_word": "Declarative",
+        "default_val": "Declarative"
+      },
+      {
+        "name": "problem",
+        "key": "problem",
+        "rank": 1,
+        "unknown_word": "NONE",
+        "pad_word": "NONE",
+        "default_val": "NONE"
+      },
+      {
+        "name": "psa",
+        "key": "psa",
+        "rank": 1,
+        "unknown_word": "NEUTRAL",
+        "pad_word": "NEUTRAL",
+        "default_val": "NEUTRAL"
+      },
+      {
+        "name": "qc",
+        "key": "qc",
+        "rank": 1,
+        "unknown_word": "ENTY",
+        "pad_word": "ENTY",
+        "default_val": "ENTY"
+      },
+      {
+        "name": "ap",
+        "key": "ap",
+        "rank": 1,
+        "unknown_word": "OTHER",
+        "pad_word": "OTHER",
+        "default_val": "OTHER"
+      }
+    ],
+    "inputs": [
+      {
+        "name": "word",
+        "key": "word",
+        "mapping_funcs": [
+          "lower",
+          "digit_norm"
+        ],
+        "config": {
+          "dim": 100,
+          "initializer": {
+            "embedding": "vectors/glove.6B.100d.txt",
+            "pkl_path": "word-vectors.pkl",
+            "include_in_vocab": 100000,
+            "zero_init": true,
+            "restrict_vocab": false
+          }
+        },
+        "threshold": 1
+      }
+    ]
+  },
+  "encoders": [
+    {
+      "name": "blstm",
+      "inputs": [
+        "word"
+      ],
+      "type": "lstm",
+      "state_size": 150,
+      "encoder_dropout": 0.5,
+      "encoder_output_dropout": 0.5,
+      "encoder_layers": 1
+    }
+  ],
+  "heads": [
+    {
+      "encoder": "blstm",
+      "name": "senti",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "blstm",
+      "name": "sent",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "blstm",
+      "name": "problem",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "blstm",
+      "name": "psa",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "blstm",
+      "name": "qc",
+      "type": "classifier",
+      "metric": "Accuracy"
+    },
+    {
+      "encoder": "blstm",
+      "name": "ap",
+      "type": "classifier",
+      "metric": "Accuracy"
+    }
+  ]
+}
