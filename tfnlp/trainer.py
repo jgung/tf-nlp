@@ -402,7 +402,7 @@ def cli():
     if opts.test:
         test_paths = []
         for test_path in opts.test:
-            test_paths.extend([t for t in test_path.split(',') if t.strip()])
+            test_paths.extend(split_paths(test_path))
         test_paths = sorted(test_paths)
 
     if mode not in TRAINING_MODES:
