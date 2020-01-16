@@ -78,7 +78,7 @@ case ${key} in
 esac
 done
 
-if [[ -z "CONFIG" ]] || [[ -z "$train_file" ]] || [[ -z "$valid_file" ]]; then
+if [[ -z "CONFIG" ]] || [[ -z "$train_file" ]] || [[ -z "$valid_file" ]] || [[ -z "$bucket_name" ]]; then
     usage
     exit
 fi
@@ -121,7 +121,7 @@ if [[ -n "$comma_separated_test_files" ]]; then
 fi
 
 
-gcloud ml-engine jobs submit training ${job_name} \
+gcloud ai-platform jobs submit training ${job_name} \
 --packages ${job_dir}/app.tar.gz \
 --config config.yaml \
 --runtime-version ${RUNTIME_VERSION} \

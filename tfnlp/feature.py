@@ -18,12 +18,15 @@ from tfnlp.common.feature_utils import int64_feature_list, int64_feature, str_fe
 from tfnlp.common.utils import Params, deserialize, serialize, write_json, read_json
 from tfnlp.layers.reduce import ConvNet, Mean
 
+SUB = "sub"
 LOWER = "lower"
 NORMALIZE_DIGITS = "digit_norm"
 CHARACTERS = "chars"
+PHRASE_CHARS = "phrase_chars"
 PREDICATE = "predicate"
 PADDING = "pad"
 CONV_PADDING = "conv"
+MAPPING = "mapping"
 
 
 def _get_reduce_function(config, dim, length):
@@ -62,21 +65,61 @@ def characters(value):
     return list(value)
 
 
+def phrase_chars(value, size=60, sep="##"):
+    chars = ' '.join(value)
+    result = chars
+    if len(chars) > size:
+        half = (size - len(sep)) // 2
+        result = chars[0:half] + sep
+        if half * 2 < size:
+            half += 1
+        result += chars[-half:]
+
+    return list(result)[:size]
+
+
 def is_predicate(value):
     return '0' if value == '-' else '1'
 
 
 def _get_mapping_function(func):
-    if func == LOWER:
-        return lower
-    elif func == NORMALIZE_DIGITS:
-        return normalize_digits
-    elif func == CHARACTERS:
-        return characters
-    elif func == PREDICATE:
-        return is_predicate
-    else:
-        raise AssertionError("Unexpected function name: {}".format(func))
+    if isinstance(func, str):
+        if func == LOWER:
+            return lower
+        elif func == NORMALIZE_DIGITS:
+            return normalize_digits
+        elif func == CHARACTERS:
+            return characters
+        elif func == PREDICATE:
+            return is_predicate
+        elif func == PHRASE_CHARS:
+            return phrase_chars
+        else:
+            raise AssertionError("Unexpected function name: {}".format(func))
+
+    if func.get("type") == SUB:
+        def mapping(raw):
+            if isinstance(raw, str):
+                return re.sub(func.get("input"), func.get("output"), raw)
+            if isinstance(raw, list):
+                return [mapping(r) for r in raw]
+            return [re.sub(func.get("input"), func.get("output"), word) for word in raw]
+
+        return mapping
+    elif func.get("type") == MAPPING:
+        mappings_dict = func.get("mappings")
+        default_val = func.get("default", constants.UNKNOWN_WORD)
+
+        def mapping(raw):
+            if isinstance(raw, str):
+                return mappings_dict.get(raw, default_val)
+            if isinstance(raw, list):
+                return [mapping(r) for r in raw]
+            return [mappings_dict.get(word, default_val) for word in raw]
+
+        return mapping
+
+    raise AssertionError("Unexpected function: {}".format(func))
 
 
 def _get_padding_function(func):
@@ -177,8 +220,12 @@ class FeatureConfig(Params):
         config = feature.get('config', Params())
         self.config = FeatureHyperparameters(config, self)
         self.constraint_key = feature.get('constraint_key')
+
+        # BERT-specific feats
         self.drop_subtokens = feature.get('drop_subtokens', False)
         self.output_type = feature.get('output_type', 'sequence_output')
+        self.segment_extractor = feature.get('segment_extractor', constants.PREDICATE_KEY)
+        self.predicate_extractor = feature.get('predicate_extractor', constants.PREDICATE_KEY)
         self.model = feature.get('model', BERT_S_CASED_URL)
 
 
@@ -222,23 +269,26 @@ def _get_feature(feature):
     return feat(**feature)
 
 
-def get_feature_extractor(config):
+def get_feature_extractor(init_config):
     """
     Create a `FeatureExtractor` from a given feature configuration.
-    :param config: feature configuration
+    :param init_config: feature configuration
     :return: feature extractor
     """
     # load default configurations
-    config = FeaturesConfig(config)
+    config = FeaturesConfig(init_config)
 
     bert_feat = next(iter([inp for inp in config.inputs if inp.name == constants.BERT_KEY]), None)
     if bert_feat:
         tf.logging.info("BERT feature found in inputs, using BERT feature extractor")
         contains_marker = len([feat for feat in config.inputs if feat.name == constants.MARKER_KEY]) > 0
-        return BertFeatureExtractor(targets=config.targets, features=config.inputs, srl=contains_marker,
+        is_srl = contains_marker or any('predicate_extractor' in inp for inp in init_config.inputs)
+        return BertFeatureExtractor(targets=config.targets, features=config.inputs, srl=is_srl,
                                     model=bert_feat.options['model'],
                                     drop_subtokens=bert_feat.options['drop_subtokens'],
-                                    output_type=bert_feat.options['output_type'])
+                                    output_type=bert_feat.options['output_type'],
+                                    segment_extractor=bert_feat.options['segment_extractor'],
+                                    predicate_extractor=bert_feat.options['predicate_extractor'])
 
     # use this feature to keep track of instance indices for error analysis
     config.inputs.append(index_feature())
@@ -451,7 +501,7 @@ class Feature(Extractor):
                 vocab[reserved_word] = len(vocab)
 
         # after adding reserved words to vocab, sort vocab by counts and add to pruned vocab
-        counts = [(feat, self.counts[feat]) for feat in sorted(self.counts, key=self.counts.get, reverse=True)
+        counts = [(feat, self.counts[feat]) for feat in sorted(self.counts, key=lambda c: (self.counts.get(c), c), reverse=True)
                   if feat not in vocab and feat not in self.reserved_words]
         for feat, count in counts:
             # TODO: this is kind of a hack to ensure that threshold applies to IOB labels properly
@@ -478,7 +528,7 @@ class Feature(Extractor):
         indices = {}
         with file_io.FileIO(path, mode='r') as vocab:
             for line in vocab:
-                line = line.strip()
+                line = line.strip('\n\r')
                 if line:
                     if line in indices:
                         raise AssertionError('Duplicate entry in vocabulary given at {}: {}'.format(path, line))
@@ -863,7 +913,7 @@ def read_vocab(extractors, base_path):
             if initializer.embedding:
                 feature.embedding = deserialize(in_path=base_path, in_name=initializer.pkl_path)
         except NotFoundError:
-            return False
+            tf.logging.warn('Could not find embedding initializer %s' % initializer.pkl_path)
     return True
 
 
@@ -940,11 +990,15 @@ class FeatureExtractor(BaseFeatureExtractor):
 
 
 class BertLengthFeature(Extractor):
-    def __init__(self, tokenizer, srl=False, name=LENGTH_KEY):
+    def __init__(self, tokenizer, srl=False, name=LENGTH_KEY,
+                 segment_extractor=constants.PREDICATE_KEY,
+                 predicate_extractor=constants.PREDICATE_KEY):
         super().__init__(name=name, key=constants.WORD_KEY)
         self.srl = srl
         self.tokenizer = tokenizer
         self.counts = {}
+        self.segment_extractor = segment_extractor
+        self.predicate_extractor = predicate_extractor
 
     def map(self, value):
         length = len(value)
@@ -954,22 +1008,60 @@ class BertLengthFeature(Extractor):
     def get_values(self, sequence):
         vals = super().get_values(sequence)
         tokens = [BERT_CLS]
-        for val in vals:
+        for i, val in enumerate(vals):
+            if self.srl and i == sequence[constants.PREDICATE_INDEX_KEY]:
+                predicate_token = self.predicate_extractor(sequence)
+                tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token))
+                continue
             tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(val))
         tokens.append(BERT_SEP)
 
         if self.srl:
             # condition on predicate, e.g. [[cls], sentence, [sep], predicate, [sep]]
-            predicate_token = vals[sequence[constants.PREDICATE_INDEX_KEY]]
-            tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token))
-            tokens.append(BERT_SEP)
+            predicate_token = self.segment_extractor(sequence)
+            if len(predicate_token) > 0:
+                tokens.extend(self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token))
+                tokens.append(BERT_SEP)
 
         return tokens
 
 
+def get_bert_sequence_extractor(sequence):
+    tokens = sequence.split()
+
+    def get_bert_sequence(instance):
+        result = []
+        for token in tokens:
+            if token == constants.PREDICATE_KEY:
+                result.append(instance[constants.WORD_KEY][instance[constants.PREDICATE_INDEX_KEY]])
+            elif token == constants.SENSE_KEY:
+                sense = instance[constants.SENSE_KEY]
+                if isinstance(sense, list):
+                    sense = sorted(sense)
+                    sense = ' '.join(sense)
+                result.append(sense)
+            elif token == constants.SENSE_KEY + "-delim":
+                sense = instance[constants.SENSE_KEY]
+                if isinstance(sense, list):
+                    sense = sorted(sense)
+                    sense = ' [SEP] '.join(sense)
+                result.append(sense)
+            elif token == constants.PREDICATE_LEMMA:
+                result.append(instance[constants.PREDICATE_LEMMA])
+            elif token == constants.SENSE_PRED_KEY:
+                result.append(instance[constants.SENSE_PRED_KEY])
+            else:
+                result.append(token)
+        return ' '.join(result)
+
+    return get_bert_sequence
+
+
 class BertFeatureExtractor(BaseFeatureExtractor):
     def __init__(self, targets, features=None, srl=False, model=BERT_S_CASED_URL, drop_subtokens=False,
-                 output_type="sequence_output") -> None:
+                 output_type="sequence_output",
+                 segment_extractor=constants.PREDICATE_KEY,
+                 predicate_extractor=constants.PREDICATE_KEY) -> None:
         super().__init__()
         self.srl = srl
         self.label_subtokens = True
@@ -986,9 +1078,13 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         self.targets = {target.name: target for target in targets}
         self.ordered_targets = [target.name for target in targets]
 
+        self.segment_extractor = get_bert_sequence_extractor(segment_extractor)
+        self.predicate_extractor = get_bert_sequence_extractor(predicate_extractor)
         len_name = constants.BERT_LENGTH_KEY if self.drop_subtokens else constants.LENGTH_KEY
         self.features = {
-            len_name: BertLengthFeature(self.tokenizer, srl=srl, name=len_name),
+            len_name: BertLengthFeature(self.tokenizer, srl=srl, name=len_name,
+                                        segment_extractor=self.segment_extractor,
+                                        predicate_extractor=self.predicate_extractor),
             SENTENCE_INDEX: index_feature(),
             constants.ACTIVE_TASK_KEY: TaskIndicator(self.ordered_targets),
             **{feature.name: feature for feature in features}
@@ -1032,13 +1128,13 @@ class BertFeatureExtractor(BaseFeatureExtractor):
 
         words = instance[constants.WORD_KEY]
         for i, word in enumerate(words):
-            if self.srl:
-                # get index of predicate
-                predicate_index = instance[constants.PREDICATE_INDEX_KEY]
-                if i == predicate_index:
-                    focus_index = predicate_index if self.drop_subtokens else len(split_tokens)
-
             sub_tokens = self.tokenizer.wordpiece_tokenizer.tokenize(word)
+            if self.srl and i == instance[constants.PREDICATE_INDEX_KEY]:
+                focus_index = instance[constants.PREDICATE_INDEX_KEY] if self.drop_subtokens else len(split_tokens)
+                pred_tokens = self.tokenizer.wordpiece_tokenizer.tokenize(self.predicate_extractor(instance))
+                if len(pred_tokens) > len(sub_tokens):
+                    mask.extend([0] * (len(pred_tokens) - len(sub_tokens)))
+                sub_tokens = pred_tokens
             split_tokens.extend(sub_tokens)
             mask.append(1)
             mask.extend([0] * (len(sub_tokens) - 1))
@@ -1067,14 +1163,15 @@ class BertFeatureExtractor(BaseFeatureExtractor):
         if self.srl:
             segment_index = len(split_tokens)
             # condition on predicate, e.g. [[cls], sentence, [sep], predicate, [sep]]
-            predicate_token = words[instance[constants.PREDICATE_INDEX_KEY]]
-            predicate_subtokens = self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token)
-            split_tokens.extend(predicate_subtokens)
-            split_tokens.append(BERT_SEP)
-            mask.extend((1 + len(predicate_subtokens)) * [0])
-            if train and not self.drop_subtokens:
-                for target, labels in split_labels.items():
-                    labels.extend((1 + len(predicate_subtokens)) * [BERT_SUBLABEL])
+            predicate_token = self.segment_extractor(instance)
+            if len(predicate_token) > 0:
+                predicate_subtokens = self.tokenizer.wordpiece_tokenizer.tokenize(predicate_token)
+                split_tokens.extend(predicate_subtokens)
+                split_tokens.append(BERT_SEP)
+                mask.extend((1 + len(predicate_subtokens)) * [0])
+                if train and not self.drop_subtokens:
+                    for target, labels in split_labels.items():
+                        labels.extend((1 + len(predicate_subtokens)) * [BERT_SUBLABEL])
 
         ids = self.tokenizer.convert_tokens_to_ids(split_tokens)
 

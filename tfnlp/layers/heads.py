@@ -24,11 +24,13 @@ class ModelHead(object):
         self.features = features
         self.params = params
         self._training = training
+        self.weight = config.weight
 
         self.targets = None
         self.logits = None
         self.loss = None
         self.predictions = None
+        self.scores = None
         self.evaluation_hooks = []
         self.metric_ops = {}
         self.metric = None
@@ -105,7 +107,6 @@ class ClassifierHead(ModelHead):
     def __init__(self, inputs, config, features, params, training):
         super().__init__(inputs, config, features, params, training)
         self._sequence_lengths = self.features[constants.LENGTH_KEY]
-        self.scores = None
 
     def _all(self):
         if len(self.inputs) == 2:
@@ -122,8 +123,7 @@ class ClassifierHead(ModelHead):
         self.loss = tf.cond(tf.reduce_sum(self.features[constants.ACTIVE_TASK_KEY], axis=0)[self.index] > 0,
                             self._loss,
                             lambda: tf.constant(0, dtype=tf.float32))
-        self.metric = tf.Variable(0, name=append_label(constants.ACCURACY_METRIC_KEY, self.name), dtype=tf.float32,
-                                  trainable=False)
+        self.metric = tf.Variable(0, name=append_label(constants.OVERALL_KEY, self.name), dtype=tf.float32, trainable=False)
 
     def _loss(self):
         if self.config.label_smoothing > 0:
@@ -168,8 +168,8 @@ class ClassifierHead(ModelHead):
             tensors[constraint_key] = self.features[constraint_key]
 
         overall_score = tf.identity(self.metric)
-        self.metric_ops[append_label(constants.ACCURACY_METRIC_KEY, self.name)] = (overall_score, overall_score)
-        overall_key = append_label(constants.ACCURACY_METRIC_KEY, self.name)
+        overall_key = append_label(constants.OVERALL_KEY, self.name)
+        self.metric_ops[overall_key] = (overall_score, overall_score)
         # https://github.com/tensorflow/tensorflow/issues/20418 -- metrics don't accept variables, so we create a tensor
         eval_placeholder = tf.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
 
@@ -211,6 +211,16 @@ class TokenClassifierHead(ClassifierHead):
         else:
             targets = self.features[constants.PREDICATE_INDEX_KEY]
         inputs = select_by_token_index(inputs, targets)
+
+        if len(self.config.mlp_layers) > 0:
+            def _leaky_relu(h):
+                return tf.nn.leaky_relu(h, alpha=0.01)
+
+            for i, dim in enumerate(self.config.mlp_layers):
+                inputs = tf.layers.dense(inputs=inputs, units=dim,
+                                         activation=_leaky_relu)
+                if self.config.mlp_dropout:
+                    inputs = tf.layers.dropout(inputs, rate=self.config.mlp_dropout, training=self._training)
 
         with tf.variable_scope("logits"):
             num_labels = self.extractor.vocab_size()
@@ -312,8 +322,8 @@ class TaggerHead(ModelHead):
         }
 
         overall_score = tf.identity(self.metric)
-        self.metric_ops[append_label(constants.OVERALL_KEY, self.name)] = (overall_score, overall_score)
         overall_key = append_label(constants.OVERALL_KEY, self.name)
+        self.metric_ops[overall_key] = (overall_score, overall_score)
         # https://github.com/tensorflow/tensorflow/issues/20418 -- metrics don't accept variables, so we create a tensor
         eval_placeholder = tf.placeholder(dtype=tf.float32, name='update_%s' % overall_key)
 

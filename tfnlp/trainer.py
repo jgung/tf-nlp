@@ -91,8 +91,9 @@ class Trainer(object):
             return
 
         # compute steps per epoch/checkpoint and early stopping steps
-        max_steps, patience, checkpoint_steps = self._compute_steps(train, valid)
+        max_steps, patience, checkpoint_steps, steps_per_epoch = self._compute_steps(train, valid)
         self._training_config.max_steps = max_steps  # update config value for learning rate calculation
+        self._training_config.steps_per_epoch = steps_per_epoch
 
         # train and evaluate using Estimator API
         estimator = self._init_estimator(checkpoint_steps)
@@ -258,7 +259,7 @@ class Trainer(object):
                             % (self._training_config.patience_epochs, patience))
         tf.logging.info('Evaluating every %d steps, %d epoch(s)' % (checkpoint_steps, self._training_config.checkpoint_epochs))
 
-        return max_steps, patience, checkpoint_steps
+        return max_steps, patience, checkpoint_steps, steps_per_epoch
 
     def _init_estimator(self, checkpoint_steps):
         return tfe.estimator.Estimator(model_fn=self._model_fn,
@@ -354,7 +355,7 @@ def default_args():
     parser.add_argument('--resources', type=str, help='shared resources directory (such as for word embeddings)')
     parser.add_argument('--train', type=str, help='training data path')
     parser.add_argument('--valid', type=str, help='validation/development data path')
-    parser.add_argument('--test', type=str, help='test data paths, comma-separated')
+    parser.add_argument('--test', type=str, nargs="*", help='test data paths, space-separated')
     parser.add_argument('--mode', type=str, default="train", help='(optional) training command, "train" by default',
                         choices=list(TRAINING_MODES))
     parser.add_argument('--script', type=str, help='(optional) evaluation script path')
@@ -394,12 +395,18 @@ def cli():
                       debug=opts.debug)
 
     mode = opts.mode
-    test_paths = split_paths(opts.test) if opts.test else None
+
+    set_up_logging(os.path.join(opts.save, '{}.log'.format(mode)))
+
+    test_paths = None
+    if opts.test:
+        test_paths = []
+        for test_path in opts.test:
+            test_paths.extend([t for t in test_path.split(',') if t.strip()])
+        test_paths = sorted(test_paths)
 
     if mode not in TRAINING_MODES:
         raise ValueError("Unexpected mode type: {}".format(mode))
-
-    set_up_logging(os.path.join(opts.save, '{}.log'.format(mode)))
 
     if mode == 'train' and not opts.train and test_paths:
         tf.logging.info('No training set provided, defaulting to test mode for %s' % opts.test)

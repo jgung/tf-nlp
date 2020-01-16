@@ -3,11 +3,13 @@ import re
 
 import tensorflow as tf
 from bert.optimization import AdamWeightDecayOptimizer
+
 from tensorflow.contrib.opt import LazyAdamOptimizer
 from tensorflow.python.training.learning_rate_decay import exponential_decay, inverse_time_decay
 
 from tfnlp.common import constants
 from tfnlp.common.utils import Params
+from tfnlp.optim.clr import cyclic_learning_rate
 from tfnlp.optim.lazy_adam import LazyAdamOptimizer as LazyNadamOptimizer
 from tfnlp.optim.nadam import NadamOptimizerSparse
 
@@ -32,6 +34,7 @@ class BaseNetworkConfig(Params):
         self.dataset_caching = config.get('dataset_caching', True)
 
         self.max_steps = config.get('max_steps')
+        self.steps_per_epoch = config.get('steps_per_epoch')
 
         self.max_epochs = config.get('max_epochs')
         self.patience_epochs = config.get('patience_epochs')
@@ -80,7 +83,6 @@ class BaseNetworkConfig(Params):
             self.optimizer = OptimizerConfig(optimizer_config)
 
 
-
 class OptimizerConfig(Params):
     def __init__(self, optimizer_config, **kwargs):
         super().__init__(**optimizer_config, **kwargs)
@@ -115,6 +117,7 @@ class EncoderConfig(Params):
         self.encoder_layers = config.get('encoder_layers', 1)
         self.state_size = config.get('state_size', 100)
         self.sequence_length_key = config.get('sequence_length_key', constants.LENGTH_KEY)
+        self.layer_norm = config.get('layer_norm', False)
 
         # transformer encoder settings
         self.num_heads = config.get('num_heads', 8)
@@ -151,6 +154,12 @@ class HeadConfig(Params):
         self.label_smoothing = config.get('label_smoothing', 0)
         # "Regularizing Neural Networks by Penalizing Confident Predictions", Pereyra et al. 2017 -- 1.0 is default
         self.confidence_penalty = config.get('confidence_penalty', 0)
+        self.weight = config.get('weight', 1)
+        self.weighted_embedding = config.get('weighted_embedding', False)
+        self.teacher_forcing = config.get('teacher_forcing', False)
+
+        self.mlp_layers = config.get('mlp_layers', [])
+        self.mlp_dropout = config.get('mlp_dropout', 0.0)
 
 
 def get_network_config(config):
@@ -174,6 +183,9 @@ def get_learning_rate(lr_config, global_step):
         decay = _transformer_learning_rate(lr_config, global_step)
     elif "bert" == name:
         decay = _bert_learning_rate(lr_config, global_step)
+    elif "clr" == name:
+        decay = cyclic_learning_rate(global_step, learning_rate=lr_config.rate, max_lr=lr_config.params.get('max_lr', 0.1),
+                                     step_size=lr_config.steps_per_epoch * lr_config.params.get('step_size', 4))
     else:
         raise ValueError("Unknown learning rate schedule: {}".format(name))
     return decay
@@ -243,6 +255,7 @@ def get_optimizer(network_config, default_optimizer=tf.train.AdadeltaOptimizer(l
         lr = optimizer.lr
     else:
         optimizer.lr.num_train_steps = network_config.max_steps
+        optimizer.lr.steps_per_epoch = network_config.steps_per_epoch
         lr = get_learning_rate(optimizer.lr, tf.train.get_global_step())
 
     name = optimizer.name

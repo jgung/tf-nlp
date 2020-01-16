@@ -235,8 +235,11 @@ class ConllSrlReader(ConllReader):
                  line_filter=lambda line: line.startswith("#") and not line.startswith("# #"),  # skip comments
                  label_mappings=None,
                  regex_mapping=False,
+                 map_with_regex_post=False,
                  sense_mappings=None,
-                 pred_filter=None):
+                 pred_filter=None,
+
+                 sense_predictions_suffix=None):
         """
         Construct an CoNLL reader for SRL.
         :param index_field_map: map from indices to corresponding fields
@@ -260,17 +263,45 @@ class ConllSrlReader(ConllReader):
         self._pred_index = [key for key, val in self._index_field_map.items() if val == pred_key][0]
         self.is_predicate = lambda x: x[self._pred_index] is not '-'
         self.prop_count = 0
-        self._label_mappings = label_mappings if label_mappings is not None else {LABEL_KEY: {}}
-        if label_mappings is not None and not regex_mapping:
+        self._label_mappings = dict(label_mappings) if label_mappings is not None else {LABEL_KEY: {}}
+        if label_mappings is not None and not (regex_mapping or map_with_regex_post):
             # add continuation/reference mappings if they aren't already there
-            for _target_mappings in label_mappings.values():
+            for _target_mappings in self._label_mappings.values():
                 c_mappings = {'C-' + k: v for k, v in _target_mappings.items()}
                 r_mappings = {'R-' + k: v for k, v in _target_mappings.items()}
                 _target_mappings.update(c_mappings)
                 _target_mappings.update(r_mappings)
         self._regex_mapping = regex_mapping
-        self._sense_mappings = sense_mappings
+        self._map_with_regex_post = map_with_regex_post
+        self._sense_mappings = dict(sense_mappings) if sense_mappings else None
         self._pred_filter = pred_filter if pred_filter is not None else lambda x: True
+        if sense_mappings:
+            self._no_mappings = set()
+            self._is_rs_mapping = re.match("^\\S+\\.\\d+$", next(iter(self._sense_mappings.keys())))
+
+        self._sense_predictions_suffix = sense_predictions_suffix
+        self._sense_predictions = {}
+
+    def read_file(self, path):
+        if self._sense_predictions_suffix is not None and file_io.file_exists(path + self._sense_predictions_suffix):
+            with file_io.FileIO(path + self._sense_predictions_suffix, 'r') as lines:
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    fields = line.split()
+                    if len(fields) < 3:
+                        tf.logging.warning("Unexpected format for predicted senses: %s" % line)
+                        continue
+                    instance_id, _, pred = fields[:3]
+                    self._sense_predictions[int(instance_id)] = pred
+        for instance in super(ConllSrlReader, self).read_file(path):
+            if self._sense_predictions_suffix is not None:
+                if instance[constants.INSTANCE_INDEX] in self._sense_predictions:
+                    instance[constants.SENSE_PRED_KEY] = self._sense_predictions[instance[constants.INSTANCE_INDEX]]
+                else:
+                    instance[constants.SENSE_PRED_KEY] = instance[constants.SENSE_KEY]
+            yield instance
 
     def read_instances(self, rows):
         instances = []
@@ -290,18 +321,30 @@ class ConllSrlReader(ConllReader):
             if HEAD_KEY in instance:
                 instance[HEAD_KEY] = [int(x) for x in instance[HEAD_KEY]]
             if SENSE_KEY in instance:
-                instance[SENSE_KEY] = str(instance[SENSE_KEY][predicate_index])
+                instance[constants.ROLESET_KEY] = str(instance[SENSE_KEY][predicate_index])
 
-                sense = instance[SENSE_KEY]
+                sense = instance[constants.ROLESET_KEY]
+                # if LABEL_KEY in instance and 'B-ARGM-LVB' in instance[LABEL_KEY]:
+                #     sense = 'HN'
+
                 if self._sense_mappings:
-                    if re.match("^\\d\\d$", sense):  # PropBank roleset, e.g. 01
-                        sense = instance[constants.PREDICATE_LEMMA] + '.' + sense  # e.g. swim.01
-                    instance[SENSE_KEY] = self._sense_mappings.get(sense, [constants.UNKNOWN_WORD])
+                    instance[constants.SENSE_PRED_KEY] = sense
+                    if self._is_rs_mapping:
+                        if re.match("^\\d\\d$", sense):  # PropBank roleset, e.g. 01
+                            sense = instance[constants.PREDICATE_LEMMA] + '.' + sense  # e.g. swim.01
+                    else:
+                        sense = instance[constants.PREDICATE_LEMMA]
 
-                if sense != 'LV':
-                    sense = '1'
-                instance[SENSE_KEY] = [index == predicate_index and sense or '0'
-                                       for index in range(0, len(all_labels[LABEL_KEY]))]
+                    mapped = self._sense_mappings.get(sense)
+                    if not mapped:
+                        if sense not in self._no_mappings:
+                            # don't spam logs, but warn for missing mappings
+                            tf.logging.warning("No mapping for %s" % sense)
+                            self._no_mappings.add(sense)
+                        mapped = ['None']
+                    sense = mapped
+                instance[SENSE_KEY] = sense
+
             instance[MARKER_KEY] = [index == predicate_index and '1' or '0'
                                     for index in range(0, len(all_labels[LABEL_KEY]))]
 
@@ -320,7 +363,8 @@ class ConllSrlReader(ConllReader):
         # convert from CoNLL05 labels to IOB labels
         for key, val in pred_cols.items():
             index_to_labels[key] = {label_key: convert_conll_to_bio(val, label_mappings=label_mapping,
-                                                                    map_with_regex=self._regex_mapping)
+                                                                    map_with_regex=self._regex_mapping,
+                                                                    map_with_regex_post=self._map_with_regex_post)
                                     for label_key, label_mapping in self._label_mappings.items()}
 
         assert len(pred_indices) <= len(index_to_labels), (
@@ -574,6 +618,7 @@ def get_reader(reader_config, training_config=None, is_test=False):
             return FileKeyTsvReader()
         elif reader_name == 'semlink':
             return SemlinkReader()
+        raise ValueError('Unexpected reader type: %s' % reader_name)
 
     if isinstance(reader_config, str):
         reader = reader_from_name(reader_config)
@@ -587,12 +632,13 @@ def get_reader(reader_config, training_config=None, is_test=False):
                                         pred_end=reader_config.get('pred_end', 0),
                                         label_mappings=reader_config.get('label_mappings'),
                                         regex_mapping=reader_config.get('map_with_regex', False),
+                                        map_with_regex_post=reader_config.get('map_with_regex_post', False),
                                         sense_mappings=reader_config.get('sense_mappings'),
-                                        pred_filter=reader_config.get('pred_filter')
-                                        )
+                                        pred_filter=reader_config.get('pred_filter'),
+                                        sense_predictions_suffix=reader_config.get('sense_predictions_suffix'))
                 if SENSE_KEY in field_index_map and PREDICATE_KEY in field_index_map:
                     def is_predicate(line):
-                        return line[field_index_map[PREDICATE_KEY]] is not '-' and line[field_index_map[SENSE_KEY]] is not '-'
+                        return line[field_index_map[PREDICATE_KEY]] is not '-' and any('(V*' in f for f in line)
 
                     reader.is_predicate = is_predicate
             else:

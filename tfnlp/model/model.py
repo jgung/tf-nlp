@@ -4,7 +4,6 @@ import tensorflow as tf
 import tensorflow_estimator as tfe
 from tensorflow.python.estimator.export.export_output import PredictOutput
 from tensorflow.python.saved_model import signature_constants
-
 from tfnlp.common import constants
 from tfnlp.common.config import train_op_from_config
 from tfnlp.common.eval import log_trainable_variables
@@ -53,7 +52,16 @@ def build(features, mode, params):
                 # input from a model head
                 head_config = head_configs[encoder_input]
                 head = get_head(head_config)
-                encoder_features[encoder_input] = get_embedding_input(head.predictions, head.extractor, training)
+
+                weights = None
+                if training and head_config.teacher_forcing:
+                    predictions = features[head.name]
+                else:
+                    if head_config.weighted_embedding:
+                        weights = head.scores
+                    predictions = head.predictions
+
+                encoder_features[encoder_input] = get_embedding_input(predictions, head.extractor, training, weights=weights)
             else:
                 raise ValueError('Missing encoder input: %s' % encoder_input)
 
@@ -74,7 +82,7 @@ def multi_head_model_fn(features, mode, params):
     loss = None
     if mode in [tfe.estimator.ModeKeys.TRAIN, tfe.estimator.ModeKeys.EVAL]:
         # compute loss for each target
-        losses = [head.loss for head in heads]
+        losses = [head.weight * head.loss for head in heads]
         # just compute mean over losses (possibly consider a more sophisticated strategy?)
         loss = losses[0] if len(losses) == 1 else tf.reduce_mean(tf.stack(losses))
 

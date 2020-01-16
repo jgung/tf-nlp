@@ -66,6 +66,8 @@ class ParserHead(ModelHead):
         _rel_logits = select_logits(self.rel_logits, self.arc_targets, self.n_steps)
         rel_loss = compute_loss(_rel_logits, self.targets, "rel_bilinear_loss")
 
+        arc_loss = self.config.get('arc_loss_weight', 1) * arc_loss
+        rel_loss = self.config.get('rel_loss_weight', 1) * rel_loss
         self.loss = arc_loss + rel_loss
         self.metric = tf.Variable(0, name=append_label(constants.OVERALL_KEY, self.name), dtype=tf.float32, trainable=False)
 
@@ -102,26 +104,25 @@ class ParserHead(ModelHead):
 
         self.evaluation_hooks = []
 
-        if self.params.script_path:
-            hook = ParserEvalHook(
-                {
-                    constants.ARC_PROBS: self.arc_probs,
-                    constants.REL_PROBS: self.rel_probs,
-                    constants.LENGTH_KEY: self.lens,  # plus one for the sentinel
-                    constants.HEAD_KEY: self.features[constants.HEAD_KEY],
-                    constants.DEPREL_KEY: self.features[constants.DEPREL_KEY],
-                    constants.SENTENCE_INDEX: self.features[constants.SENTENCE_INDEX]
-                },
-                evaluator=DepParserEvaluator(
-                    target=self.extractor,
-                    output_path=os.path.join(self.params.job_dir, self.name + '.dev'),
-                    script_path=self.params.script_path
-                ),
-                eval_update=tf.assign(self.metric, eval_placeholder),
-                eval_placeholder=eval_placeholder,
-                output_dir=self.params.job_dir
-            )
-            self.evaluation_hooks.append(hook)
+        hook = ParserEvalHook(
+            {
+                constants.ARC_PROBS: self.arc_probs,
+                constants.REL_PROBS: self.rel_probs,
+                constants.LENGTH_KEY: self.lens,  # plus one for the sentinel
+                constants.HEAD_KEY: self.features[constants.HEAD_KEY],
+                constants.DEPREL_KEY: self.features[constants.DEPREL_KEY],
+                constants.SENTENCE_INDEX: self.features[constants.SENTENCE_INDEX]
+            },
+            evaluator=DepParserEvaluator(
+                target=self.extractor,
+                output_path=os.path.join(self.params.job_dir, self.name + '.dev'),
+                script_path=self.params.script_path
+            ),
+            eval_update=tf.assign(self.metric, eval_placeholder),
+            eval_placeholder=eval_placeholder,
+            output_dir=self.params.job_dir
+        )
+        self.evaluation_hooks.append(hook)
 
     def _prediction(self):
         self.export_outputs = {constants.REL_PROBS: self.rel_probs,
